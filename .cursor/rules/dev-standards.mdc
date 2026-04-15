@@ -1,0 +1,28 @@
+---
+description: Regras obrigatórias de arquitetura e desenvolvimento do CappyCloud (hexagonal, ports & adapters, cobertura, tipos)
+alwaysApply: true
+---
+
+# CappyCloud — Regras de Desenvolvimento
+
+Consulte [docs/AGENT_RULES.md](../docs/AGENT_RULES.md) para o conjunto completo.
+Resumo das regras críticas:
+
+## Localização de Lógica
+
+- Toda lógica de negócio em `app/application/use_cases/`
+- Routers (`app/adapters/primary/http/`) só: parse → call use case → return response
+- Validação em `app/domain/value_objects.py` — nunca duplicar
+
+## Ports & Adapters
+
+- Toda dependência externa via Port (ABC em `app/ports/`)
+- Nova port = adapter real em `app/adapters/secondary/` + fake em `tests/conftest.py`
+- Fakes implementam o mesmo ABC (LSP obrigatório)
+
+## Qualidade
+
+- Máximo 300 linhas por arquivo
+- Type annotations em todas as funções e classes públicas (`mypy app/` zero erros)
+- Cobertura ≥ 80% (`pytest --cov`)
+- Testes unitários: apenas fakes em memória (sem DB, sem rede)
