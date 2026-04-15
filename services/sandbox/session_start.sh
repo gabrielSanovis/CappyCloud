@@ -92,4 +92,15 @@ else
     mkdir -p "$WORKTREE_PATH"
 fi
 
+# ── Injeta CLAUDE.md no worktree ─────────────────────────────
+# openclaude usa working_directory=worktree; garante que o CLAUDE.md
+# esteja presente diretamente no worktree, não só no repo principal.
+if [ -f /app/CLAUDE.md ]; then
+    cp /app/CLAUDE.md "$WORKTREE_PATH/CLAUDE.md"
+    echo "[session_start] CLAUDE.md injetado em $WORKTREE_PATH"
+elif [ -f "/repos/${ENV_SLUG}/CLAUDE.md" ]; then
+    cp "/repos/${ENV_SLUG}/CLAUDE.md" "$WORKTREE_PATH/CLAUDE.md"
+    echo "[session_start] CLAUDE.md copiado do repo principal para $WORKTREE_PATH"
+fi
+
 echo "[session_start] OK"
