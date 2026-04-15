@@ -4,3 +4,44 @@ body,
   height: 100%;
   margin: 0;
 }
+
+/* ── Design System: The Silent Architect ─────────────────────── */
+/* Mapeamento das superfícies do Stitch para variáveis Mantine    */
+
+[data-mantine-color-scheme='dark'] {
+  /* Surface hierarchy — obsidian tonal nesting */
+  --mantine-color-body:   #0e0e0f;
+  --mantine-color-dark-9: #000000;
+  --mantine-color-dark-8: #0e0e0f;
+  --mantine-color-dark-7: #131315;
+  --mantine-color-dark-6: #19191b;
+  --mantine-color-dark-5: #1f1f22;
+  --mantine-color-dark-4: #252628;
+  --mantine-color-dark-3: #2b2c2f;
+  --mantine-color-dark-2: #48484b;
+  --mantine-color-dark-1: #757578;
+  --mantine-color-dark-0: #acaaae;
+
+  /* Design system tokens */
+  --cc-surface:             #0e0e0f;
+  --cc-surface-low:         #131315;
+  --cc-surface-container:   #19191b;
+  --cc-surface-high:        #1f1f22;
+  --cc-surface-highest:     #252628;
+  --cc-surface-bright:      #2b2c2f;
+  --cc-on-surface:          #e7e5e8;
+  --cc-on-surface-variant:  #acaaae;
+  --cc-outline-variant:     #48484b;
+  --cc-primary:             #3b82f6;
+  --cc-secondary:           #22c55e;
+  --cc-error:               #ef4444;
+}
+
+/* Scrollbar fina no estilo IDE */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--cc-surface-high) transparent;
+}
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--cc-surface-high); border-radius: 3px; }

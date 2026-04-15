@@ -29,15 +29,15 @@ export function ToolCallCard({ tool }: Props) {
   const borderColor = tool.done
     ? tool.isError
       ? 'var(--mantine-color-red-8)'
-      : 'var(--mantine-color-dark-4)'
-    : 'var(--mantine-color-teal-8)'
+      : 'var(--cc-outline-variant)'
+    : 'var(--cc-primary)'
 
   return (
     <div
       className={styles.toolCard}
       style={{
         border: `1px solid ${borderColor}`,
-        borderRadius: 8,
+        borderRadius: 4,
         overflow: 'hidden',
         maxWidth: '92%',
         animation: 'fadeInUp 0.2s ease both',
@@ -47,7 +47,7 @@ export function ToolCallCard({ tool }: Props) {
       <div
         className={tool.done ? styles.toolHeader : undefined}
         onClick={() => tool.done && setOpen((o) => !o)}
-        style={{ background: 'var(--mantine-color-dark-7)' }}
+        style={{ background: 'var(--cc-surface-container)' }}
       >
         <Group px="sm" py={6} gap="xs">
           {tool.done ? (
@@ -56,7 +56,7 @@ export function ToolCallCard({ tool }: Props) {
                 ✗
               </Text>
             ) : (
-              <Text size="sm" c="teal" lh={1}>
+              <Text size="sm" c="green" lh={1}>
                 ✓
               </Text>
             )
@@ -78,7 +78,7 @@ export function ToolCallCard({ tool }: Props) {
               {open ? '▲' : '▼'}
             </Text>
           ) : (
-            <Badge size="xs" variant="dot" color="teal">
+            <Badge size="xs" variant="dot" color="blue">
               a executar
             </Badge>
           )}
@@ -87,7 +87,7 @@ export function ToolCallCard({ tool }: Props) {
 
       {/* Collapsible detail */}
       <Collapse expanded={open && tool.done}>
-        <div style={{ padding: '8px 12px', background: 'var(--mantine-color-dark-8)' }}>
+        <div style={{ padding: '8px 12px', background: 'var(--cc-surface-low)' }}>
           {inputDisplay && (
             <>
               <Text size="xs" c="dimmed" mb={4} tt="uppercase" fw={600} style={{ letterSpacing: '0.04em' }}>

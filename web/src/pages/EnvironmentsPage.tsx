@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   ActionIcon,
   Badge,
@@ -137,7 +138,19 @@ export function EnvironmentsPage({ token }: Props) {
   return (
     <Container size="md" py="xl">
         <Group justify="space-between" mb="lg">
-        <Title order={2}>Ambientes</Title>
+        <Group gap="sm">
+          <Button
+            component={Link}
+            to="/"
+            variant="subtle"
+            size="xs"
+            color="gray"
+            leftSection="←"
+          >
+            Voltar ao chat
+          </Button>
+          <Title order={2}>Ambientes</Title>
+        </Group>
         <Group>
           <ActionIcon variant="subtle" onClick={load} title="Atualizar" size="lg">
             ↻
