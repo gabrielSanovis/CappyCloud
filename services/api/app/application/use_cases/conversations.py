@@ -1,4 +1,4 @@
-"""Conversation use cases — business logic for chat management and agent streaming.
+"""Conversation and environment use cases — business logic for chat management.
 
 No FastAPI, no SQLAlchemy. All dependencies injected via ports (ABCs).
 """
@@ -9,10 +9,15 @@ import asyncio
 import json
 import uuid
 from collections.abc import AsyncGenerator
+from typing import Optional
 
-from app.domain.entities import Conversation, Message
+from app.domain.entities import Conversation, Message, RepoEnvironment
 from app.ports.agent import AgentPort
-from app.ports.repositories import ConversationRepository, MessageRepository
+from app.ports.repositories import (
+    ConversationRepository,
+    MessageRepository,
+    RepoEnvironmentRepository,
+)
 
 _TITLE_MAX_LEN = 80
 _DEFAULT_TITLE = "Nova conversa"
@@ -24,6 +29,67 @@ def _next_chunk(gen):  # type: ignore[no-untyped-def]
         return next(gen)
     except StopIteration:
         return None
+
+
+# ── Repo Environment use cases ───────────────────────────────────────────────
+
+
+class ListRepoEnvironments:
+    """Return all global repo environments."""
+
+    def __init__(self, repo_envs: RepoEnvironmentRepository) -> None:
+        self._repo_envs = repo_envs
+
+    async def execute(self) -> list[RepoEnvironment]:
+        return await self._repo_envs.list_all()
+
+
+class CreateRepoEnvironment:
+    """Create a new global repo environment."""
+
+    def __init__(self, repo_envs: RepoEnvironmentRepository) -> None:
+        self._repo_envs = repo_envs
+
+    async def execute(
+        self,
+        slug: str,
+        name: str,
+        repo_url: str,
+        branch: str = "main",
+    ) -> RepoEnvironment:
+        existing = await self._repo_envs.get_by_slug(slug)
+        if existing:
+            raise ValueError(f"Ambiente com slug '{slug}' já existe.")
+        env = RepoEnvironment(
+            id=uuid.uuid4(),
+            slug=slug,
+            name=name,
+            repo_url=repo_url,
+            branch=branch,
+        )
+        return await self._repo_envs.save(env)
+
+
+class DeleteRepoEnvironment:
+    """Delete a global repo environment."""
+
+    def __init__(
+        self,
+        repo_envs: RepoEnvironmentRepository,
+        agent: AgentPort,
+    ) -> None:
+        self._repo_envs = repo_envs
+        self._agent = agent
+
+    async def execute(self, env_id: uuid.UUID) -> None:
+        env = await self._repo_envs.get(env_id)
+        if not env:
+            raise LookupError("Ambiente não encontrado.")
+        self._agent.destroy_env(env.slug)
+        await self._repo_envs.delete(env_id)
+
+
+# ── Conversation use cases ────────────────────────────────────────────────────
 
 
 class ListConversations:
@@ -43,12 +109,16 @@ class CreateConversation:
         self._conversations = conversations
 
     async def execute(
-        self, user_id: uuid.UUID, title: str | None = None
+        self,
+        user_id: uuid.UUID,
+        title: str | None = None,
+        environment_id: Optional[uuid.UUID] = None,
     ) -> Conversation:
         conv = Conversation(
             id=uuid.uuid4(),
             user_id=user_id,
             title=title or _DEFAULT_TITLE,
+            environment_id=environment_id,
         )
         return await self._conversations.save(conv)
 
@@ -85,7 +155,7 @@ class StreamMessage:
     1. Verify conversation ownership.
     2. Persist the user message.
     3. Optionally auto-title the conversation.
-    4. Load history and call the agent.
+    4. Load history and call the agent (passing env_slug if set).
     5. Yield SSE bytes to the HTTP layer.
     6. Persist the accumulated assistant response after streaming.
 
@@ -142,9 +212,9 @@ class StreamMessage:
             "user_id": str(user_id),
             "conversation_id": str(conversation_id),
             "user": {"id": str(user_id)},
+            "env_slug": conv.env_slug or "default",
         }
 
-        # Return the async generator (not awaited — calling it creates the generator object)
         return self._stream_chunks(
             content, model_id, messages_payload, pipeline_body, conversation_id
         )

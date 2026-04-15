@@ -36,7 +36,12 @@ async def list_conversations(
     convs = await uc.execute(current.id)
     return [
         ConversationOut(
-            id=c.id, title=c.title, created_at=c.created_at, updated_at=c.updated_at
+            id=c.id,
+            title=c.title,
+            created_at=c.created_at,
+            updated_at=c.updated_at,
+            environment_id=c.environment_id,
+            env_slug=c.env_slug,
         )
         for c in convs
     ]
@@ -48,11 +53,17 @@ async def create_conversation(
     uc: Annotated[CreateConversation, Depends(get_create_conv_uc)],
     body: ConversationCreate | None = None,
 ) -> ConversationOut:
-    """Cria conversa nova."""
+    """Cria conversa nova, opcionalmente ligada a um ambiente."""
     title = body.title if body and body.title else None
-    conv = await uc.execute(current.id, title)
+    environment_id = body.environment_id if body else None
+    conv = await uc.execute(current.id, title, environment_id)
     return ConversationOut(
-        id=conv.id, title=conv.title, created_at=conv.created_at, updated_at=conv.updated_at
+        id=conv.id,
+        title=conv.title,
+        created_at=conv.created_at,
+        updated_at=conv.updated_at,
+        environment_id=conv.environment_id,
+        env_slug=conv.env_slug,
     )
 
 

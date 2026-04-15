@@ -31,7 +31,7 @@ class AgentPort(ABC):
             user_message: The latest user input.
             model_id: Identifier for the model/pipeline variant.
             messages: Full conversation history as role/content dicts.
-            body: Request metadata (user_id, conversation_id, etc.).
+            body: Request metadata (user_id, conversation_id, env_slug, etc.).
         """
 
     @abstractmethod
@@ -43,16 +43,31 @@ class AgentPort(ABC):
         """Release resources gracefully."""
 
     @abstractmethod
-    def get_env_status(self, user_id: str) -> dict:  # type: ignore[type-arg]
-        """Return the current status of the user's sandbox environment.
+    def get_env_status(self, env_slug: str) -> dict:  # type: ignore[type-arg]
+        """Return the current status of a global environment container.
 
         Possible values for the ``status`` key:
         - ``none``     — no record or container
         - ``stopped``  — container exists but is stopped
         - ``starting`` — container is being created or restarted
         - ``running``  — container is running and gRPC is accessible
+
+        Args:
+            env_slug: Unique identifier (slug) of the repo environment.
         """
 
     @abstractmethod
-    def wake_env(self, user_id: str) -> None:
-        """Trigger sandbox environment creation/restart (fire-and-forget)."""
+    def wake_env(self, env_slug: str) -> None:
+        """Trigger environment container creation/restart (fire-and-forget).
+
+        Args:
+            env_slug: Unique identifier (slug) of the repo environment.
+        """
+
+    @abstractmethod
+    def destroy_env(self, env_slug: str) -> None:
+        """Stop and remove the environment container for a slug (fire-and-forget).
+
+        Args:
+            env_slug: Unique identifier (slug) of the repo environment.
+        """

@@ -4,7 +4,7 @@
 #
 # 1. Writes openclaude settings for OpenRouter (or any OpenAI-
 #    compatible provider set via env vars).
-# 2. Optionally clones a git workspace.
+# 2. Clones the git workspace into /repos/<ENV_SLUG>/
 # 3. Starts openclaude in gRPC headless server mode.
 # ──────────────────────────────────────────────────────────────
 set -euo pipefail
@@ -18,7 +18,9 @@ OPENAI_MODEL="${OPENAI_MODEL:-anthropic/claude-3.5-sonnet}"
 CLAUDE_CODE_USE_OPENAI="${CLAUDE_CODE_USE_OPENAI:-1}"
 GRPC_HOST="${GRPC_HOST:-0.0.0.0}"
 GRPC_PORT="${GRPC_PORT:-50051}"
+ENV_SLUG="${ENV_SLUG:-default}"
 WORKSPACE_REPO="${WORKSPACE_REPO:-}"
+WORKSPACE_BRANCH="${WORKSPACE_BRANCH:-main}"
 GIT_AUTH_TOKEN="${GIT_AUTH_TOKEN:-}"
 AZURE_ORG="${AZURE_ORG:-}"
 
@@ -32,59 +34,62 @@ cat > ~/.claude/settings.json <<EOF
 }
 EOF
 
-echo "Provider: OpenRouter  model=${OPENAI_MODEL}"
+echo "Provider: OpenRouter  model=${OPENAI_MODEL}  env=${ENV_SLUG}"
 
 # ── Configure git authentication ─────────────────────────────
-# Uses the `insteadOf` technique: rewrites plain https:// URLs to include
-# the PAT before they reach the server. This works regardless of whether
-# the original URL contains an embedded username (user@host).
 if [ -n "${GIT_AUTH_TOKEN}" ]; then
-    # Azure DevOps — a non-empty username ('pat') is required for Basic auth to work
     git config --global url."https://pat:${GIT_AUTH_TOKEN}@dev.azure.com".insteadOf \
         "https://dev.azure.com"
 
-    # Handle URLs with embedded username: https://anyuser@dev.azure.com/...
-    # Git normalises these to https://dev.azure.com/... before credential
-    # lookup, so the rule above already covers them. But add an explicit
-    # per-org rule just in case:
     if [ -n "${AZURE_ORG:-}" ]; then
         git config --global url."https://pat:${GIT_AUTH_TOKEN}@dev.azure.com/${AZURE_ORG}".insteadOf \
             "https://${AZURE_ORG}@dev.azure.com/${AZURE_ORG}"
     fi
 
-    # GitHub PAT fallback
     git config --global url."https://x-token:${GIT_AUTH_TOKEN}@github.com".insteadOf \
         "https://github.com"
 
     echo "Git credentials configured via insteadOf."
 fi
 
-# ── Clone or update workspace ─────────────────────────────────
+# ── Prepare workspace layout ─────────────────────────────────
+# /repos/<slug>/          → clone principal do repo
+# /repos/<slug>/sessions/ → worktrees por conversa (session_start.sh)
+MAIN_REPO="/repos/${ENV_SLUG}"
+mkdir -p "${MAIN_REPO}" "/repos/${ENV_SLUG}/sessions"
+
 if [ -n "${WORKSPACE_REPO}" ]; then
-    # Strip embedded username — auth is handled by the insteadOf git config above
     CLEAN_REPO=$(echo "${WORKSPACE_REPO}" | sed 's|https://[^@]*@|https://|')
 
-    if [ -d /workspace/.git ]; then
-        echo "Workspace already cloned — running git pull to get latest code..."
-        cd /workspace && git pull --ff-only 2>&1 || echo "WARNING: git pull failed — continuing with existing code."
+    if [ -d "${MAIN_REPO}/.git" ]; then
+        echo "Workspace already cloned — running git pull..."
+        cd "${MAIN_REPO}" && git pull --ff-only 2>&1 || echo "WARNING: git pull failed — continuing."
     else
-        echo "Cloning ${CLEAN_REPO} into /workspace..."
-        if git clone --depth=1 "${CLEAN_REPO}" /workspace 2>&1; then
+        echo "Cloning ${CLEAN_REPO} (branch=${WORKSPACE_BRANCH}) into ${MAIN_REPO}..."
+        if git clone --depth=1 --branch "${WORKSPACE_BRANCH}" "${CLEAN_REPO}" "${MAIN_REPO}" 2>&1 \
+            || git clone --depth=1 "${CLEAN_REPO}" "${MAIN_REPO}" 2>&1; then
             echo "Clone successful."
         else
             echo "WARNING: git clone failed — starting with empty workspace."
         fi
     fi
 else
-    echo "No WORKSPACE_REPO set — starting with empty workspace."
+    echo "No WORKSPACE_REPO set — starting with empty workspace at ${MAIN_REPO}."
+fi
+
+# Garante que existe um repo git (com pelo menos um commit) para os worktrees funcionarem.
+if [ ! -d "${MAIN_REPO}/.git" ]; then
+    git -C "${MAIN_REPO}" init -b main
+fi
+if ! git -C "${MAIN_REPO}" rev-parse HEAD >/dev/null 2>&1; then
+    git -C "${MAIN_REPO}" config user.email "agent@cappycloud.local"
+    git -C "${MAIN_REPO}" config user.name "CappyCloud Agent"
+    git -C "${MAIN_REPO}" commit --allow-empty -m "initial"
 fi
 
 # ── Inject agent instructions ─────────────────────────────────
-# Copy CLAUDE.md into the workspace root so openclaude reads it
-# automatically as context. This does NOT modify the git repo —
-# it only exists inside this container's filesystem.
 if [ -f /app/CLAUDE.md ]; then
-    cp /app/CLAUDE.md /workspace/CLAUDE.md
+    cp /app/CLAUDE.md "${MAIN_REPO}/CLAUDE.md"
     echo "CLAUDE.md injected into workspace."
 fi
 

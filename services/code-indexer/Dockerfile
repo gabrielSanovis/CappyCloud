@@ -21,6 +21,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # ── Python dependencies ───────────────────────────────────────
+# Instala torch CPU-only primeiro para evitar baixar os 1,3 GB da versão CUDA.
+RUN pip install --no-cache-dir \
+        torch==2.6.0+cpu torchvision==0.21.0+cpu \
+        --extra-index-url https://download.pytorch.org/whl/cpu
 COPY services/code-indexer/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

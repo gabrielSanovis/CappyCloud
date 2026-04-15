@@ -1,9 +1,9 @@
 """
-CappyCloud Agent Pipeline — Persistent Environments with Git Worktrees
+CappyCloud Agent Pipeline — Global Environments with Git Worktrees
 
 Key behaviours:
-  - Each user_id maps to ONE persistent environment container.
-  - Each (user_id, chat_id) gets its own git worktree inside that container.
+  - Each env_slug maps to ONE persistent environment container (global, not per-user).
+  - Each (user_id, chat_id) gets its own git worktree inside the env container.
   - A single openclaude gRPC server per container handles all sessions;
     each ChatRequest carries working_directory → the session's worktree path.
   - GrpcSession is persistent: the gRPC stream stays open between pipe() calls.
@@ -62,18 +62,18 @@ def _chat_id_from_body(body: dict, messages: list) -> str:
 
 
 def _user_id_from_body(body: dict) -> str:
-    """
-    Resolve user id for the (user_id, chat_id) pair.
-
-    Legacy: Open WebUI sends ``user`` as dict; LibreChat as string ObjectId.
-    FastAPI sends ``user_id`` or ``user``: { "id": "..." }.
-    """
+    """Resolve user id for the (user_id, chat_id) pair."""
     raw = body.get("user")
     if raw is None:
         return str(body.get("user_id") or "anonymous")
     if isinstance(raw, dict):
         return str(raw.get("id") or body.get("user_id") or "anonymous")
     return str(raw)
+
+
+def _env_slug_from_body(body: dict) -> str:
+    """Resolve environment slug from body, defaulting to 'default'."""
+    return str(body.get("env_slug") or "default")
 
 
 def _sse(payload: dict) -> str:
@@ -90,7 +90,6 @@ class Pipeline:
     class Valves(BaseModel):
         OPENROUTER_API_KEY: str = Field(default="")
         OPENROUTER_MODEL: str = Field(default="anthropic/claude-3.5-sonnet")
-        WORKSPACE_REPO: str = Field(default="")
         GIT_AUTH_TOKEN: str = Field(default="")
         SANDBOX_IMAGE: str = Field(default="cappycloud-sandbox:latest")
         DOCKER_NETWORK: str = Field(default="cappycloud_net")
@@ -108,7 +107,6 @@ class Pipeline:
             OPENROUTER_MODEL=os.getenv(
                 "OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet"
             ),
-            WORKSPACE_REPO=os.getenv("WORKSPACE_REPO", ""),
             GIT_AUTH_TOKEN=os.getenv("GIT_AUTH_TOKEN", ""),
             SANDBOX_IMAGE=os.getenv("SANDBOX_IMAGE", "cappycloud-sandbox:latest"),
             DOCKER_NETWORK=os.getenv("DOCKER_NETWORK", "cappycloud_net"),
@@ -146,16 +144,12 @@ class Pipeline:
             sandbox_grpc_port=self.valves.SANDBOX_GRPC_PORT,
             openrouter_api_key=self.valves.OPENROUTER_API_KEY,
             openrouter_model=self.valves.OPENROUTER_MODEL,
-            workspace_repo=self.valves.WORKSPACE_REPO,
             git_auth_token=self.valves.GIT_AUTH_TOKEN,
             code_indexer_url=self.valves.CODE_INDEXER_URL,
         )
 
         self._gc_task = asyncio.create_task(self._gc_loop())
-        log.info(
-            "CappyCloud agent ready. Repo: %s",
-            self.valves.WORKSPACE_REPO or "(não configurado)",
-        )
+        log.info("CappyCloud agent ready (global env model).")
 
     async def on_shutdown(self) -> None:
         log.info("CappyCloud agent pipeline shutting down…")
@@ -172,25 +166,27 @@ class Pipeline:
             raise RuntimeError("Pipeline not started")
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result(timeout=timeout)
 
-    def get_env_status(self, user_id: str) -> dict:
-        """
-        Return the current environment status for a user.
-
-        Returns dict: { status: 'none'|'stopped'|'starting'|'running', container_id: str|None }
-        """
+    def get_env_status(self, env_slug: str) -> dict:
+        """Return the current environment status for a slug."""
         if self._env_manager is None:
             return {"status": "none", "container_id": None}
-        return self._run(self._env_manager.get_env_status(user_id), timeout=30)
+        return self._run(self._env_manager.get_env_status(env_slug), timeout=30)
 
-    def wake_env(self, user_id: str) -> None:
-        """
-        Trigger environment creation or restart in the background event loop.
-        Returns immediately; the environment will be ready when get_env_status returns 'running'.
-        """
+    def wake_env(self, env_slug: str) -> None:
+        """Trigger environment creation or restart (fire-and-forget)."""
         if self._loop is None or self._env_manager is None:
             return
         asyncio.run_coroutine_threadsafe(
-            self._env_manager._get_or_create_env(user_id),
+            self._env_manager._get_or_create_env(env_slug),
+            self._loop,
+        )
+
+    def destroy_env(self, env_slug: str) -> None:
+        """Stop and remove environment container for a slug (fire-and-forget)."""
+        if self._loop is None or self._env_manager is None:
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._env_manager.destroy_env(env_slug),
             self._loop,
         )
 
@@ -203,9 +199,16 @@ class Pipeline:
     ) -> Generator[str, None, None]:
         user_id = _user_id_from_body(body)
         chat_id = _chat_id_from_body(body, messages)
+        env_slug = _env_slug_from_body(body)
         session_key = (user_id, chat_id)
 
-        log.info("pipe() user=%s chat=%s msg=%r", user_id, chat_id, user_message[:80])
+        log.info(
+            "pipe() user=%s chat=%s env=%s msg=%r",
+            user_id,
+            chat_id,
+            env_slug,
+            user_message[:80],
+        )
 
         session: Optional[GrpcSession] = self._sessions.get(session_key)
 
@@ -227,6 +230,7 @@ class Pipeline:
                     self._env_manager.get_or_create_session(
                         user_id=user_id,
                         chat_id=chat_id,
+                        env_slug=env_slug,
                     ),
                     timeout=180,
                 )
@@ -238,8 +242,7 @@ class Pipeline:
                 yield _sse({"type": "error", "message": f"Erro ao iniciar o agente: {exc}"})
                 return
 
-            # Worktree path defaults to /workspace/main when empty
-            working_directory = sandbox.worktree_path or "/workspace/main"
+            working_directory = sandbox.worktree_path or f"/repos/{env_slug}"
 
             session = GrpcSession(
                 container_ip=sandbox.container_ip,
@@ -300,14 +303,12 @@ class Pipeline:
 
             elif event_type == "action":
                 action: PendingAction = data
-                # Auto-approve all actions — headless mode, no human confirmation needed
                 log.info(
                     "[%s] Auto-approving action: %s",
                     session_key,
                     action.question[:80],
                 )
                 self._run(session.send_input("yes"), timeout=10)
-                # Resume draining — the session is still alive
                 asyncio.run_coroutine_threadsafe(
                     session.drain_to(out_q), self._loop
                 )
@@ -330,3 +331,4 @@ class Pipeline:
                 break
             except Exception:
                 log.exception("GC loop error")
+

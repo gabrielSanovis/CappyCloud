@@ -2,11 +2,11 @@
 # ──────────────────────────────────────────────────────────────
 # CappyCloud Persistent Environment Init
 #
-# Runs once when a user's environment container starts.
-# Clones the base repo into /workspace/main and starts ONE
+# Runs once when a global environment container starts.
+# Clones the base repo into /repos/<ENV_SLUG>/ and starts ONE
 # openclaude gRPC server that handles ALL sessions in this
 # container (each ChatRequest specifies its own working_directory
-# pointing to a git worktree under /workspace/sessions/).
+# pointing to a git worktree under /repos/<slug>/sessions/).
 # ──────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -19,9 +19,13 @@ OPENAI_MODEL="${OPENAI_MODEL:-anthropic/claude-3.5-sonnet}"
 CLAUDE_CODE_USE_OPENAI="${CLAUDE_CODE_USE_OPENAI:-1}"
 GRPC_HOST="${GRPC_HOST:-0.0.0.0}"
 GRPC_PORT="${GRPC_PORT:-50051}"
+ENV_SLUG="${ENV_SLUG:-default}"
 WORKSPACE_REPO="${WORKSPACE_REPO:-}"
+WORKSPACE_BRANCH="${WORKSPACE_BRANCH:-main}"
 GIT_AUTH_TOKEN="${GIT_AUTH_TOKEN:-}"
 AZURE_ORG="${AZURE_ORG:-}"
+
+MAIN_REPO="/repos/${ENV_SLUG}"
 
 # ── Configure openclaude ──────────────────────────────────────
 mkdir -p ~/.claude
@@ -32,11 +36,10 @@ cat > ~/.claude/settings.json <<EOF
 }
 EOF
 
-echo "Provider: OpenRouter  model=${OPENAI_MODEL}"
+echo "Provider: OpenRouter  model=${OPENAI_MODEL}  env=${ENV_SLUG}"
 
 # ── Configure git authentication ─────────────────────────────
 if [ -n "${GIT_AUTH_TOKEN}" ]; then
-    # Azure DevOps — a non-empty username ('pat') is required for Basic auth to work
     git config --global url."https://pat:${GIT_AUTH_TOKEN}@dev.azure.com".insteadOf \
         "https://dev.azure.com"
 
@@ -56,46 +59,41 @@ git config --global user.email "${GIT_USER_EMAIL:-agent@cappycloud.local}"
 git config --global user.name "${GIT_USER_NAME:-CappyCloud Agent}"
 
 # ── Create workspace structure ────────────────────────────────
-mkdir -p /workspace/main /workspace/sessions
+mkdir -p "${MAIN_REPO}" "/repos/${ENV_SLUG}/sessions"
 
-# ── Clone or update base repo into /workspace/main ───────────
+# ── Clone or update base repo into /repos/<slug>/ ────────────
 if [ -n "${WORKSPACE_REPO}" ]; then
     CLEAN_REPO=$(echo "${WORKSPACE_REPO}" | sed 's|https://[^@]*@|https://|')
 
-    if [ -d /workspace/main/.git ]; then
+    if [ -d "${MAIN_REPO}/.git" ]; then
         echo "Base repo already present — pulling latest..."
-        cd /workspace/main && git pull --ff-only 2>&1 \
+        cd "${MAIN_REPO}" && git pull --ff-only 2>&1 \
             || echo "WARNING: git pull failed — continuing with existing code."
     else
-        echo "Cloning ${CLEAN_REPO} into /workspace/main..."
-        if git clone --depth=1 "${CLEAN_REPO}" /workspace/main 2>&1; then
+        echo "Cloning ${CLEAN_REPO} (branch=${WORKSPACE_BRANCH}) into ${MAIN_REPO}..."
+        if git clone --depth=1 --branch "${WORKSPACE_BRANCH}" "${CLEAN_REPO}" "${MAIN_REPO}" 2>&1 \
+            || git clone --depth=1 "${CLEAN_REPO}" "${MAIN_REPO}" 2>&1; then
             echo "Clone successful."
         else
             echo "WARNING: git clone failed — initialising empty workspace."
-            cd /workspace/main
-            git init
-            git config user.email "agent@cappycloud.local"
-            git config user.name "CappyCloud Agent"
-            git commit --allow-empty -m "init"
         fi
     fi
 else
-    echo "No WORKSPACE_REPO set — initialising empty git workspace."
-    if [ ! -d /workspace/main/.git ]; then
-        cd /workspace/main
-        git init
-        git config user.email "agent@cappycloud.local"
-        git config user.name "CappyCloud Agent"
-        git commit --allow-empty -m "init"
-    fi
+    echo "No WORKSPACE_REPO set — initialising empty git workspace at ${MAIN_REPO}."
+fi
+
+# Garante repo git com commit válido para os worktrees funcionarem.
+if [ ! -d "${MAIN_REPO}/.git" ]; then
+    cd "${MAIN_REPO}" && git init
+fi
+if ! git -C "${MAIN_REPO}" rev-parse HEAD >/dev/null 2>&1; then
+    git -C "${MAIN_REPO}" commit --allow-empty -m "init"
 fi
 
 # ── Inject agent instructions ─────────────────────────────────
-# Place CLAUDE.md in /workspace/main so every worktree inherits it.
-# Does NOT modify the git index — stays untracked inside the container.
 if [ -f /app/CLAUDE.md ]; then
-    cp /app/CLAUDE.md /workspace/main/CLAUDE.md
-    echo "CLAUDE.md injected into /workspace/main."
+    cp /app/CLAUDE.md "${MAIN_REPO}/CLAUDE.md"
+    echo "CLAUDE.md injected into ${MAIN_REPO}."
 fi
 
 # ── Export provider env vars for openclaude ──────────────────
@@ -107,8 +105,6 @@ export GRPC_HOST="${GRPC_HOST}"
 export GRPC_PORT="${GRPC_PORT}"
 
 # ── Start the single openclaude gRPC server ───────────────────
-# One process handles all concurrent sessions in this container.
-# Each ChatRequest carries its own working_directory → correct worktree.
 echo "Starting openclaude gRPC server on ${GRPC_HOST}:${GRPC_PORT}..."
 cd /openclaude
 exec npm run dev:grpc

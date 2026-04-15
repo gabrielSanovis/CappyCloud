@@ -45,8 +45,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Workspace directory (populated at runtime via git clone) ──
-RUN mkdir -p /workspace
-WORKDIR /workspace
+# /repos/<slug>/ → clone do repo; criado pelo env_init.sh no start
+RUN mkdir -p /repos
+WORKDIR /repos
 
 # ── Agent instructions injected into every workspace ──────────
 # CLAUDE.md is placed in each worktree by session_start.sh so openclaude

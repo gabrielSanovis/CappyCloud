@@ -8,5 +8,6 @@ from app.infrastructure.orm_models import (  # noqa: F401
     Base,
     Conversation,
     Message,
+    RepoEnvironment,
     User,
 )

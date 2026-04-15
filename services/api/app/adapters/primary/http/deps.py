@@ -18,20 +18,31 @@ from app.adapters.secondary.persistence.sqlalchemy_conversation_repo import (
 from app.adapters.secondary.persistence.sqlalchemy_message_repo import (
     SQLAlchemyMessageRepository,
 )
+from app.adapters.secondary.persistence.sqlalchemy_repo_env_repo import (
+    SQLAlchemyRepoEnvironmentRepository,
+)
 from app.adapters.secondary.persistence.sqlalchemy_user_repo import (
     SQLAlchemyUserRepository,
 )
 from app.application.use_cases.auth import GetCurrentUser, LoginUser, RegisterUser
 from app.application.use_cases.conversations import (
     CreateConversation,
+    CreateRepoEnvironment,
+    DeleteRepoEnvironment,
     ListConversations,
     ListMessages,
+    ListRepoEnvironments,
     StreamMessage,
 )
 from app.domain.entities import User
 from app.infrastructure.database import get_db
 from app.ports.agent import AgentPort
-from app.ports.repositories import ConversationRepository, MessageRepository, UserRepository
+from app.ports.repositories import (
+    ConversationRepository,
+    MessageRepository,
+    RepoEnvironmentRepository,
+    UserRepository,
+)
 from app.ports.services import PasswordService, TokenService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -68,6 +79,12 @@ def get_msg_repo(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> MessageRepository:
     return SQLAlchemyMessageRepository(session)
+
+
+def get_repo_env_repo(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> RepoEnvironmentRepository:
+    return SQLAlchemyRepoEnvironmentRepository(session)
 
 
 # ---------------------------------------------------------------------------
@@ -159,3 +176,22 @@ def get_stream_msg_uc(
     agent: Annotated[AgentPort, Depends(get_agent)],
 ) -> StreamMessage:
     return StreamMessage(convs, msgs, agent)
+
+
+def get_list_repo_envs_uc(
+    repo_envs: Annotated[RepoEnvironmentRepository, Depends(get_repo_env_repo)],
+) -> ListRepoEnvironments:
+    return ListRepoEnvironments(repo_envs)
+
+
+def get_create_repo_env_uc(
+    repo_envs: Annotated[RepoEnvironmentRepository, Depends(get_repo_env_repo)],
+) -> CreateRepoEnvironment:
+    return CreateRepoEnvironment(repo_envs)
+
+
+def get_delete_repo_env_uc(
+    repo_envs: Annotated[RepoEnvironmentRepository, Depends(get_repo_env_repo)],
+    agent: Annotated[AgentPort, Depends(get_agent)],
+) -> DeleteRepoEnvironment:
+    return DeleteRepoEnvironment(repo_envs, agent)

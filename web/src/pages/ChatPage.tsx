@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   AppShell,
+  Badge,
   Burger,
   Button,
+  Divider,
   Group,
   ScrollArea,
+  Select,
   Stack,
   Text,
   Textarea,
@@ -16,18 +20,16 @@ import {
   createConversation,
   fetchConversations,
   fetchMessages,
-  getEnvironmentStatus,
+  fetchRepoEnvironments,
   getToken,
   setToken,
   streamAssistantReply,
-  wakeEnvironment,
   type ActionRequiredEvent,
   type ChatMessage,
   type Conversation,
-  type EnvStatus,
+  type RepoEnv,
 } from '../api'
 import { ActionRequiredCard } from '../components/ActionRequiredCard'
-import { EnvStatusBanner } from '../components/EnvStatusBanner'
 import { ThinkingIndicator } from '../components/ThinkingIndicator'
 import { ToolCallCard, type ToolCallState } from '../components/ToolCallCard'
 import styles from '../components/chat.module.css'
@@ -47,9 +49,9 @@ export function ChatPage() {
   const [streaming, setStreaming] = useState(false)
   const [loading, setLoading] = useState(true)
 
-  // Environment lifecycle state
-  const [envStatus, setEnvStatus] = useState<EnvStatus>('none')
-  const envPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Environments
+  const [envs, setEnvs] = useState<RepoEnv[]>([])
+  const [selectedEnvId, setSelectedEnvId] = useState<string | null>(null)
 
   // Streaming state
   const [pendingText, setPendingText] = useState('')
@@ -58,62 +60,23 @@ export function ChatPage() {
 
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  // Auto-scroll to bottom when messages or pending state change
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
     }
   }, [messages, pendingText, pendingTools, pendingAction, streaming])
 
-  // On mount: check environment status and pre-warm if needed
-  useEffect(() => {
-    let cancelled = false
-
-    async function checkAndWakeEnv() {
-      const result = await getEnvironmentStatus(token)
-      if (cancelled) return
-      setEnvStatus(result.status)
-
-      if (result.status !== 'running') {
-        await wakeEnvironment(token)
-        if (!cancelled) setEnvStatus('starting')
-        startEnvPolling()
-      }
-    }
-
-    checkAndWakeEnv()
-    return () => {
-      cancelled = true
-      stopEnvPolling()
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token])
-
-  function startEnvPolling() {
-    if (envPollRef.current) return
-    envPollRef.current = setInterval(async () => {
-      const result = await getEnvironmentStatus(token)
-      setEnvStatus(result.status)
-      if (result.status === 'running') {
-        stopEnvPolling()
-      }
-    }, 3000)
-  }
-
-  function stopEnvPolling() {
-    if (envPollRef.current) {
-      clearInterval(envPollRef.current)
-      envPollRef.current = null
-    }
-  }
-
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
-        const list = await fetchConversations(token)
+        const [list, envList] = await Promise.all([
+          fetchConversations(token),
+          fetchRepoEnvironments(token),
+        ])
         if (cancelled) return
         setConversations(list)
+        setEnvs(envList)
         if (list.length > 0) {
           setActiveId((prev) => prev ?? list[0].id)
         }
@@ -139,7 +102,7 @@ export function ChatPage() {
   }, [activeId, token])
 
   async function handleNewChat() {
-    const c = await createConversation(token)
+    const c = await createConversation(token, selectedEnvId)
     setConversations((prev) => [c, ...prev])
     setActiveId(c.id)
     setMessages([])
@@ -199,7 +162,6 @@ export function ChatPage() {
         },
       })
 
-      // Stream ended — reload messages from DB (includes both text and error responses)
       setPendingText('')
       setPendingTools([])
       const msgs = await fetchMessages(token, activeId)
@@ -220,7 +182,6 @@ export function ChatPage() {
   }
 
   function handleActionReply(reply: string) {
-    // Send as a normal message — backend routes to send_input() if pending action exists
     handleSend(reply)
   }
 
@@ -229,8 +190,15 @@ export function ChatPage() {
     window.location.reload()
   }
 
-  const activeTitle = conversations.find((c) => c.id === activeId)?.title ?? 'Conversa'
+  const activeConv = conversations.find((c) => c.id === activeId)
+  const activeTitle = activeConv?.title ?? 'Conversa'
+  const activeEnvSlug = activeConv?.env_slug ?? null
   const showThinking = streaming && !pendingText && pendingTools.every((t) => t.done) && !pendingAction
+
+  const envSelectData = [
+    { value: '', label: 'Sem ambiente (sandbox vazio)' },
+    ...envs.map((e) => ({ value: e.id, label: `${e.name} (${e.slug})` })),
+  ]
 
   if (loading) {
     return (
@@ -256,17 +224,36 @@ export function ChatPage() {
             <Burger opened={mobileOpened} onClick={toggleMobile} hiddenFrom="sm" size="sm" />
             <Title order={4}>CappyCloud</Title>
           </Group>
-          <Button variant="subtle" onClick={logout}>
-            Sair
-          </Button>
+          <Group>
+            <Button component={Link} to="/environments" variant="subtle" size="xs">
+              Ambientes
+            </Button>
+            <Button variant="subtle" onClick={logout}>
+              Sair
+            </Button>
+          </Group>
         </Group>
       </AppShell.Header>
 
       <AppShell.Navbar p="md">
-        <Button fullWidth mb="sm" onClick={handleNewChat}>
-          Nova conversa
-        </Button>
-        <ScrollArea h="calc(100vh - 120px)">
+        <Stack gap="xs" mb="sm">
+          <Select
+            size="xs"
+            label="Ambiente para nova conversa"
+            placeholder="Sem ambiente"
+            data={envSelectData}
+            value={selectedEnvId ?? ''}
+            onChange={(v) => setSelectedEnvId(v || null)}
+            clearable={false}
+          />
+          <Button fullWidth size="sm" onClick={handleNewChat}>
+            Nova conversa
+          </Button>
+        </Stack>
+
+        <Divider mb="xs" />
+
+        <ScrollArea h="calc(100vh - 200px)">
           <Stack gap={4}>
             {conversations.map((c) => (
               <UnstyledButton
@@ -278,9 +265,14 @@ export function ChatPage() {
                   background: c.id === activeId ? 'var(--mantine-color-dark-5)' : undefined,
                 }}
               >
-                <Text size="sm" lineClamp={2}>
+                <Text size="sm" lineClamp={1}>
                   {c.title}
                 </Text>
+                {c.env_slug && (
+                  <Badge size="xs" variant="dot" color="teal" mt={2}>
+                    {c.env_slug}
+                  </Badge>
+                )}
               </UnstyledButton>
             ))}
           </Stack>
@@ -288,15 +280,19 @@ export function ChatPage() {
       </AppShell.Navbar>
 
       <AppShell.Main>
-        <Title order={5} mb="md">
-          {activeTitle}
-        </Title>
+        <Group mb="md" gap="xs" align="center">
+          <Title order={5}>{activeTitle}</Title>
+          {activeEnvSlug && (
+            <Badge size="sm" variant="light" color="teal">
+              {activeEnvSlug}
+            </Badge>
+          )}
+        </Group>
 
         {!activeId ? (
           <Text c="dimmed">Crie uma conversa para começar.</Text>
         ) : (
           <>
-            <EnvStatusBanner status={envStatus} />
             <ScrollArea
               h="calc(100vh - 220px)"
               mb="md"
@@ -304,30 +300,22 @@ export function ChatPage() {
               viewportRef={scrollRef}
             >
               <Stack gap="md">
-                {/* Stored messages */}
                 {messages.map((m) => (
                   <PaperMessage key={m.id} role={m.role} content={m.content} />
                 ))}
 
-                {/* Live streaming area */}
                 {streaming && (
                   <Stack gap="xs">
-                    {/* Tool call cards */}
                     {pendingTools.map((tool) => (
                       <ToolCallCard key={tool.id} tool={tool} />
                     ))}
-
-                    {/* Thinking indicator — shown while waiting for first output */}
                     {showThinking && <ThinkingIndicator />}
-
-                    {/* Streaming text */}
                     {pendingText && (
                       <PaperMessage role="assistant" content={pendingText} />
                     )}
                   </Stack>
                 )}
 
-                {/* Action required card — shown outside streaming so persists after stream ends */}
                 {pendingAction && (
                   <ActionRequiredCard
                     action={pendingAction}
@@ -338,7 +326,7 @@ export function ChatPage() {
             </ScrollArea>
 
             <Textarea
-              placeholder="Mensagem ao agente… (URLs de repo Git são detetadas automaticamente)"
+              placeholder="Mensagem ao agente… (Enter para enviar, Shift+Enter para nova linha)"
               minRows={3}
               value={input}
               onChange={(e) => setInput(e.currentTarget.value)}
@@ -386,3 +374,4 @@ function PaperMessage({ role, content }: { role: string; content: string }) {
     </div>
   )
 }
+

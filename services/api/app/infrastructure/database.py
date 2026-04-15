@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.infrastructure.config import get_settings
@@ -20,8 +21,17 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db() -> None:
-    """Cria tabelas em desenvolvimento (sem Alembic)."""
+    """Cria tabelas e aplica migrations incrementais."""
     from app.infrastructure import orm_models
 
     async with engine.begin() as conn:
+        # Cria tabelas novas (incluindo repo_environments antes de conversations para a FK)
         await conn.run_sync(orm_models.Base.metadata.create_all)
+        # Migration incremental: adiciona environment_id a conversas já existentes
+        await conn.execute(
+            text(
+                "ALTER TABLE conversations "
+                "ADD COLUMN IF NOT EXISTS environment_id UUID "
+                "REFERENCES repo_environments(id) ON DELETE SET NULL"
+            )
+        )

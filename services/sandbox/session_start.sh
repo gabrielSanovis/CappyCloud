@@ -1,52 +1,45 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────
-# CappyCloud Session Worktree Setup
+# /session_start.sh — Cria um git worktree por sessão de conversa
 #
-# Called via `docker exec` by the API when a new conversation
-# starts inside a persistent environment container.
-# Creates an isolated git worktree for the session so the agent
-# operates in a clean, branch-isolated directory while sharing
-# the repo's object store with all other sessions in this container.
+# Uso:  /session_start.sh <env_slug> <session_id> <worktree_path>
 #
-# Usage: /session_start.sh <session_id> <worktree_path>
-#   session_id    — short identifier used as the git branch name
-#   worktree_path — absolute path inside the container (e.g. /workspace/sessions/abc123)
+# Chamado via `docker exec` pelo EnvironmentManager sempre que uma
+# nova conversa começa.  O worktree é criado a partir de /repos/<env_slug>.
 # ──────────────────────────────────────────────────────────────
 set -euo pipefail
 
-SESSION_ID="${1:?SESSION_ID (arg 1) is required}"
-WORKTREE_PATH="${2:?WORKTREE_PATH (arg 2) is required}"
-MAIN_REPO="/workspace/main"
-BRANCH="cappy/session/${SESSION_ID}"
+ENV_SLUG="${1:?Usage: session_start.sh <env_slug> <session_id> <worktree_path>}"
+SESSION_ID="${2:?Usage: session_start.sh <env_slug> <session_id> <worktree_path>}"
+WORKTREE_PATH="${3:?Usage: session_start.sh <env_slug> <session_id> <worktree_path>}"
+MAIN_REPO="/repos/${ENV_SLUG}"
 
-echo "Setting up worktree for session '${SESSION_ID}' at '${WORKTREE_PATH}'..."
+echo "[session_start] env=${ENV_SLUG}  session=${SESSION_ID}  worktree=${WORKTREE_PATH}"
 
-# ── Idempotent: skip if worktree already exists ───────────────
-if [ -d "${WORKTREE_PATH}" ] && { [ -f "${WORKTREE_PATH}/.git" ] || [ -d "${WORKTREE_PATH}/.git" ]; }; then
-    echo "Worktree already exists at ${WORKTREE_PATH} — skipping creation."
+mkdir -p "$(dirname "$WORKTREE_PATH")"
+
+# Se o worktree já existe, apenas valida
+if [ -d "$WORKTREE_PATH/.git" ] || [ -f "$WORKTREE_PATH/.git" ]; then
+    echo "[session_start] Worktree já existe — reutilizando."
     exit 0
 fi
 
-mkdir -p "$(dirname "${WORKTREE_PATH}")"
+if [ -d "$MAIN_REPO/.git" ]; then
+    # Garante que HEAD aponta para um commit válido antes de criar o worktree.
+    if ! git -C "$MAIN_REPO" rev-parse HEAD >/dev/null 2>&1; then
+        echo "[session_start] Repo sem commits — criando commit inicial..."
+        git -C "$MAIN_REPO" config user.email "agent@cappycloud.local"
+        git -C "$MAIN_REPO" config user.name "CappyCloud Agent"
+        git -C "$MAIN_REPO" commit --allow-empty -m "init"
+    fi
 
-# ── Create worktree on a dedicated branch ────────────────────
-# A named branch lets the agent commit changes that can later be
-# pushed or reviewed as a PR, exactly like Claude Code cloud.
-cd "${MAIN_REPO}"
-
-if git worktree add "${WORKTREE_PATH}" -b "${BRANCH}" 2>/dev/null; then
-    echo "Worktree created on new branch '${BRANCH}'."
+    BRANCH="session/$SESSION_ID"
+    echo "[session_start] Criando worktree git: branch=$BRANCH"
+    git -C "$MAIN_REPO" worktree add -b "$BRANCH" "$WORKTREE_PATH" 2>&1 \
+        || git -C "$MAIN_REPO" worktree add "$WORKTREE_PATH" 2>&1
 else
-    # Branch already exists (container restarted, session recovered) — detach
-    git worktree add "${WORKTREE_PATH}" --detach 2>&1
-    echo "Worktree created in detached state (branch '${BRANCH}' already exists)."
+    echo "[session_start] Sem repo git em $MAIN_REPO — criando directório vazio."
+    mkdir -p "$WORKTREE_PATH"
 fi
 
-# ── Inject agent instructions into the worktree ──────────────
-# CLAUDE.md is not committed — stays untracked inside the container.
-if [ -f /app/CLAUDE.md ]; then
-    cp /app/CLAUDE.md "${WORKTREE_PATH}/CLAUDE.md"
-    echo "CLAUDE.md injected into ${WORKTREE_PATH}."
-fi
-
-echo "Session worktree ready: ${WORKTREE_PATH}"
+echo "[session_start] OK"

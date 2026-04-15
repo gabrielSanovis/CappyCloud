@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Optional
 
 
 def _utcnow() -> datetime:
@@ -22,6 +23,18 @@ class User:
 
 
 @dataclass
+class RepoEnvironment:
+    """Ambiente global (repositório git) partilhado por todos os utilizadores."""
+
+    id: uuid.UUID
+    slug: str
+    name: str
+    repo_url: str
+    branch: str = "main"
+    created_at: datetime = field(default_factory=_utcnow)
+
+
+@dataclass
 class Conversation:
     """Thread de conversa pertencente a um utilizador."""
 
@@ -30,6 +43,8 @@ class Conversation:
     title: str
     created_at: datetime = field(default_factory=_utcnow)
     updated_at: datetime = field(default_factory=_utcnow)
+    environment_id: Optional[uuid.UUID] = None
+    env_slug: Optional[str] = None
 
 
 @dataclass

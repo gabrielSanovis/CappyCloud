@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from abc import ABC, abstractmethod
 
-from app.domain.entities import Conversation, Message, User
+from app.domain.entities import Conversation, Message, RepoEnvironment, User
 
 
 class UserRepository(ABC):
@@ -26,6 +26,30 @@ class UserRepository(ABC):
     @abstractmethod
     async def save(self, user: User) -> User:
         """Persist a new user and return it with any DB-generated fields."""
+
+
+class RepoEnvironmentRepository(ABC):
+    """Port for global repo environment persistence."""
+
+    @abstractmethod
+    async def list_all(self) -> list[RepoEnvironment]:
+        """Return all repo environments ordered by name."""
+
+    @abstractmethod
+    async def get(self, env_id: uuid.UUID) -> RepoEnvironment | None:
+        """Return repo environment by primary key, or None if not found."""
+
+    @abstractmethod
+    async def get_by_slug(self, slug: str) -> RepoEnvironment | None:
+        """Return repo environment by slug, or None if not found."""
+
+    @abstractmethod
+    async def save(self, env: RepoEnvironment) -> RepoEnvironment:
+        """Persist a new repo environment and return it."""
+
+    @abstractmethod
+    async def delete(self, env_id: uuid.UUID) -> None:
+        """Remove a repo environment record."""
 
 
 class ConversationRepository(ABC):

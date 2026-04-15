@@ -43,6 +43,27 @@ class UUIDType(TypeDecorator):  # type: ignore[type-arg]
         return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
 
 
+class RepoEnvironment(Base):
+    """Ambiente global (repositório git) partilhado por todos os utilizadores."""
+
+    __tablename__ = "repo_environments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, primary_key=True, default=uuid.uuid4
+    )
+    slug: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    repo_url: Mapped[str] = mapped_column(Text, nullable=False)
+    branch: Mapped[str] = mapped_column(String(256), nullable=False, default="main")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    conversations: Mapped[list["Conversation"]] = relationship(
+        "Conversation", back_populates="environment"
+    )
+
+
 class User(Base):
     """Utilizador registado."""
 
@@ -57,7 +78,7 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-    conversations: Mapped[list[Conversation]] = relationship(
+    conversations: Mapped[list["Conversation"]] = relationship(
         "Conversation", back_populates="user", cascade="all, delete-orphan"
     )
 
@@ -73,6 +94,12 @@ class Conversation(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUIDType, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    environment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType,
+        ForeignKey("repo_environments.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     title: Mapped[str] = mapped_column(String(512), default="Nova conversa")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -82,7 +109,10 @@ class Conversation(Base):
     )
 
     user: Mapped[User] = relationship("User", back_populates="conversations")
-    messages: Mapped[list[Message]] = relationship(
+    environment: Mapped[RepoEnvironment | None] = relationship(
+        "RepoEnvironment", back_populates="conversations"
+    )
+    messages: Mapped[list["Message"]] = relationship(
         "Message", back_populates="conversation", cascade="all, delete-orphan"
     )
 

@@ -40,10 +40,14 @@ class PipelineAdapter(AgentPort):
         """Gracefully shut down the Pipeline and its background tasks."""
         await self._pipeline.on_shutdown()
 
-    def get_env_status(self, user_id: str) -> dict:  # type: ignore[type-arg]
+    def get_env_status(self, env_slug: str) -> dict:  # type: ignore[type-arg]
         """Delegate environment status query to the underlying Pipeline."""
-        return self._pipeline.get_env_status(user_id)  # type: ignore[no-any-return]
+        return self._pipeline.get_env_status(env_slug)  # type: ignore[no-any-return]
 
-    def wake_env(self, user_id: str) -> None:
+    def wake_env(self, env_slug: str) -> None:
         """Delegate environment wake to the underlying Pipeline."""
-        self._pipeline.wake_env(user_id)
+        self._pipeline.wake_env(env_slug)
+
+    def destroy_env(self, env_slug: str) -> None:
+        """Delegate environment destruction to the underlying Pipeline."""
+        self._pipeline.destroy_env(env_slug)

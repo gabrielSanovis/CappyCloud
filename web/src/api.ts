@@ -132,6 +132,8 @@ export type Conversation = {
   title: string
   created_at: string
   updated_at: string
+  environment_id: string | null
+  env_slug: string | null
 }
 
 export type ChatMessage = {
@@ -177,14 +179,17 @@ export async function fetchConversations(token: string): Promise<Conversation[]>
   return res.json()
 }
 
-export async function createConversation(token: string): Promise<Conversation> {
+export async function createConversation(
+  token: string,
+  environmentId?: string | null
+): Promise<Conversation> {
   const res = await fetch('/api/conversations', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({}),
+    body: JSON.stringify({ environment_id: environmentId ?? null }),
   })
   if (!res.ok) throw new Error('Não foi possível criar conversa')
   return res.json()
@@ -286,12 +291,75 @@ export interface EnvironmentStatusResponse {
   container_id: string | null
 }
 
+export type RepoEnv = {
+  id: string
+  slug: string
+  name: string
+  repo_url: string
+  branch: string
+  created_at: string
+}
+
+export type RepoEnvCreate = {
+  slug: string
+  name: string
+  repo_url: string
+  branch?: string
+}
+
 /**
- * Returns the current status of the user's sandbox environment.
+ * Lista todos os ambientes de repositório globais.
  */
-export async function getEnvironmentStatus(token: string): Promise<EnvironmentStatusResponse> {
+export async function fetchRepoEnvironments(token: string): Promise<RepoEnv[]> {
+  const res = await fetch('/api/environments', {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error('Não foi possível carregar ambientes')
+  return res.json()
+}
+
+/**
+ * Cria um novo ambiente de repositório global.
+ */
+export async function createRepoEnvironment(
+  token: string,
+  data: RepoEnvCreate
+): Promise<RepoEnv> {
+  const res = await fetch('/api/environments', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ branch: 'main', ...data }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(formatApiErrorPayload(err) || 'Falha ao criar ambiente')
+  }
+  return res.json()
+}
+
+/**
+ * Remove um ambiente de repositório global.
+ */
+export async function deleteRepoEnvironment(token: string, envId: string): Promise<void> {
+  const res = await fetch(`/api/environments/${envId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error('Falha ao remover ambiente')
+}
+
+/**
+ * Returns the current status of a repo environment's Docker container.
+ */
+export async function getRepoEnvironmentStatus(
+  token: string,
+  envId: string
+): Promise<EnvironmentStatusResponse> {
   try {
-    const res = await fetch('/api/environments/status', {
+    const res = await fetch(`/api/environments/${envId}/status`, {
       headers: { Authorization: `Bearer ${token}` },
     })
     if (!res.ok) return { status: 'none', container_id: null }
@@ -303,16 +371,31 @@ export async function getEnvironmentStatus(token: string): Promise<EnvironmentSt
 
 /**
  * Triggers environment creation or restart in the background (fire-and-forget).
- * Poll getEnvironmentStatus() until status === 'running'.
  */
-export async function wakeEnvironment(token: string): Promise<void> {
+export async function wakeRepoEnvironment(token: string, envId: string): Promise<void> {
   try {
-    await fetch('/api/environments/wake', {
+    await fetch(`/api/environments/${envId}/wake`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
     })
   } catch {
     // Ignore network errors — the pipeline will create the env on first message anyway
   }
+}
+
+/**
+ * Returns the current status of the user's sandbox environment.
+ * @deprecated Use getRepoEnvironmentStatus with a specific envId instead.
+ */
+export async function getEnvironmentStatus(token: string): Promise<EnvironmentStatusResponse> {
+  return { status: 'none', container_id: null }
+}
+
+/**
+ * Triggers environment creation or restart in the background (fire-and-forget).
+ * @deprecated Use wakeRepoEnvironment with a specific envId instead.
+ */
+export async function wakeEnvironment(token: string): Promise<void> {
+  // no-op — environments are now per-slug, not per-user
 }
 
