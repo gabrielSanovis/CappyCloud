@@ -53,6 +53,8 @@ services:
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:-cappyneo4j}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - cappycloud_net
     ports:
