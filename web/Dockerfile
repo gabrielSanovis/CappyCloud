@@ -2,11 +2,12 @@
 #   docker build -f web/Dockerfile .
 
 FROM node:20-alpine AS build
+RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
 WORKDIR /app
-COPY web/package*.json ./
-RUN npm ci
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 COPY web/ ./
-RUN npm run build
+RUN pnpm run build
 
 FROM nginx:1.27-alpine
 COPY web/nginx.conf /etc/nginx/conf.d/default.conf

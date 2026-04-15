@@ -1,14 +1,15 @@
 """
-CappyCloud Agent Pipeline — Interactive choices
+CappyCloud Agent Pipeline — Persistent Environments with Git Worktrees
 
 Key behaviours:
-  - Each (user_id, chat_id) maps to one sandbox container + one GrpcSession
-  - GrpcSession is persistent: the gRPC stream stays open between pipe() calls
+  - Each user_id maps to ONE persistent environment container.
+  - Each (user_id, chat_id) gets its own git worktree inside that container.
+  - A single openclaude gRPC server per container handles all sessions;
+    each ChatRequest carries working_directory → the session's worktree path.
+  - GrpcSession is persistent: the gRPC stream stays open between pipe() calls.
   - When openclaude emits ActionRequired, the stream PAUSES and the user sees
-    a formatted choice prompt in the chat
-  - The user's next message is detected as a reply and routed back to the stream
-  - New conversation turns (no pending action) send a new ChatRequest on the
-    same session_id so openclaude maintains context
+    a formatted choice prompt in the chat.
+  - The user's next message is detected as a reply and routed back to the stream.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from ._docker_manager import DockerManager
+from ._environment_manager import EnvironmentManager
 from ._grpc_session import GrpcSession, PendingAction, _DONE
 from ._session_store import SessionStore
 
@@ -53,9 +54,7 @@ def _stable_chat_id(messages: list[dict]) -> str:
 
 
 def _chat_id_from_body(body: dict, messages: list) -> str:
-    """
-    Prefer explicit conversation id from the API (PostgreSQL), else legacy hash.
-    """
+    """Prefer explicit conversation id from the API (PostgreSQL), else legacy hash."""
     explicit = body.get("conversation_id") or body.get("chat_id")
     if explicit:
         return str(explicit)
@@ -119,9 +118,10 @@ class Pipeline:
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._store: Optional[SessionStore] = None
-        self._docker: Optional[DockerManager] = None
+        self._env_manager: Optional[EnvironmentManager] = None
         self._gc_task: Optional[asyncio.Task] = None
 
+        # In-memory map of live gRPC sessions: (user_id, chat_id) → GrpcSession
         self._sessions: dict[tuple[str, str], GrpcSession] = {}
 
     async def on_startup(self) -> None:
@@ -135,7 +135,7 @@ class Pipeline:
         )
         await self._store.connect()
 
-        self._docker = DockerManager(
+        self._env_manager = EnvironmentManager(
             session_store=self._store,
             sandbox_image=self.valves.SANDBOX_IMAGE,
             docker_network=self.valves.DOCKER_NETWORK,
@@ -187,7 +187,7 @@ class Pipeline:
             self._run(session.send_input(user_message), timeout=10)
 
         elif session and session.is_alive():
-            log.info("Continuing live session")
+            log.info("Continuing live session in worktree")
             self._run(session.send_message(user_message), timeout=10)
 
         else:
@@ -197,22 +197,29 @@ class Pipeline:
 
             try:
                 sandbox = self._run(
-                    self._docker.get_or_create(user_id=user_id, chat_id=chat_id),
+                    self._env_manager.get_or_create_session(
+                        user_id=user_id,
+                        chat_id=chat_id,
+                    ),
                     timeout=180,
                 )
             except TimeoutError as exc:
                 yield _sse({"type": "error", "message": f"Timeout ao iniciar o agente. {exc}"})
                 return
             except Exception as exc:
-                log.exception("Falha ao criar sandbox")
+                log.exception("Falha ao criar sessão")
                 yield _sse({"type": "error", "message": f"Erro ao iniciar o agente: {exc}"})
                 return
+
+            # Worktree path defaults to /workspace/main when empty
+            working_directory = sandbox.worktree_path or "/workspace/main"
 
             session = GrpcSession(
                 container_ip=sandbox.container_ip,
                 grpc_port=sandbox.grpc_port,
                 session_id=f"{user_id}:{chat_id}",
                 model=self.valves.OPENROUTER_MODEL,
+                working_directory=working_directory,
             )
             try:
                 self._run(session.start(user_message), timeout=30)
@@ -287,8 +294,8 @@ class Pipeline:
                 dead = [k for k, s in self._sessions.items() if not s.is_alive()]
                 for k in dead:
                     await self._sessions.pop(k).close()
-                if self._docker:
-                    await self._docker.gc_expired()
+                if self._env_manager:
+                    await self._env_manager.gc_expired()
             except asyncio.CancelledError:
                 break
             except Exception:

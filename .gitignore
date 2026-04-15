@@ -18,6 +18,7 @@ venv/
 web/node_modules/
 web/dist/
 npm-debug.log*
+.pnpm-debug.log*
 
 # IDE / OS
 .idea/

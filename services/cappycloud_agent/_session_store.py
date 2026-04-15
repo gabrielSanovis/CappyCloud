@@ -1,5 +1,6 @@
 """
-Session store: maps (user_id, chat_id) → sandbox metadata.
+Session store: maps (user_id, chat_id) → worktree session metadata,
+               and user_id → persistent environment container metadata.
 
 Uses Redis as primary fast cache (with TTL for auto-expiry) and
 PostgreSQL as persistent record for audit / restart recovery.
@@ -9,7 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Optional
 
 import asyncpg
@@ -19,8 +20,25 @@ log = logging.getLogger(__name__)
 
 
 @dataclass
+class EnvironmentRecord:
+    """Represents a persistent environment container for a user."""
+
+    user_id: str
+    container_id: str
+    container_ip: str
+    workspace_repo: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "EnvironmentRecord":
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+
+@dataclass
 class SandboxRecord:
-    """Represents a live sandbox container for a user session."""
+    """Represents a live worktree session for a (user_id, chat_id) pair."""
 
     user_id: str
     chat_id: str
@@ -28,6 +46,7 @@ class SandboxRecord:
     container_ip: str
     grpc_port: int
     workspace_repo: str = ""
+    worktree_path: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -38,18 +57,34 @@ class SandboxRecord:
 
 
 _SCHEMA = """
-CREATE TABLE IF NOT EXISTS cappy_sessions (
+CREATE TABLE IF NOT EXISTS cappy_environments (
     id           SERIAL PRIMARY KEY,
-    user_id      TEXT NOT NULL,
-    chat_id      TEXT NOT NULL,
-    container_id TEXT,
-    container_ip TEXT,
-    grpc_port    INTEGER,
+    user_id      TEXT NOT NULL UNIQUE,
+    container_id TEXT NOT NULL,
+    container_ip TEXT NOT NULL,
     workspace_repo TEXT DEFAULT '',
     created_at   TIMESTAMPTZ DEFAULT NOW(),
-    last_active  TIMESTAMPTZ DEFAULT NOW(),
+    last_active  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS cappy_sessions (
+    id             SERIAL PRIMARY KEY,
+    user_id        TEXT NOT NULL,
+    chat_id        TEXT NOT NULL,
+    container_id   TEXT,
+    container_ip   TEXT,
+    grpc_port      INTEGER,
+    workspace_repo TEXT DEFAULT '',
+    worktree_path  TEXT DEFAULT '',
+    created_at     TIMESTAMPTZ DEFAULT NOW(),
+    last_active    TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (user_id, chat_id)
 );
+"""
+
+# Ensure worktree_path column exists on pre-existing deployments
+_MIGRATE = """
+ALTER TABLE cappy_sessions ADD COLUMN IF NOT EXISTS worktree_path TEXT DEFAULT '';
 """
 
 
@@ -68,6 +103,7 @@ class SessionStore:
         self._pool = await asyncpg.create_pool(self._db_url, min_size=1, max_size=5)
         async with self._pool.acquire() as conn:
             await conn.execute(_SCHEMA)
+            await conn.execute(_MIGRATE)
         log.info("SessionStore connected (redis=%s)", self._redis_url)
 
     async def close(self) -> None:
@@ -76,17 +112,75 @@ class SessionStore:
         if self._pool:
             await self._pool.close()
 
-    # ── Helpers ──────────────────────────────────────────────────
+    # ── Redis key helpers ────────────────────────────────────────
 
     @staticmethod
-    def _key(user_id: str, chat_id: str) -> str:
+    def _env_key(user_id: str) -> str:
+        return f"env:{user_id}"
+
+    @staticmethod
+    def _session_key(user_id: str, chat_id: str) -> str:
         return f"sandbox:{user_id}:{chat_id}"
 
-    # ── CRUD ─────────────────────────────────────────────────────
+    # ── Environment CRUD ─────────────────────────────────────────
+
+    async def get_env(self, user_id: str) -> Optional[EnvironmentRecord]:
+        """Return environment record from Redis cache, or fall back to PostgreSQL."""
+        key = self._env_key(user_id)
+
+        raw = await self._redis.get(key)
+        if raw:
+            return EnvironmentRecord.from_dict(json.loads(raw))
+
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM cappy_environments WHERE user_id=$1",
+                user_id,
+            )
+        if row:
+            record = EnvironmentRecord.from_dict(dict(row))
+            await self._redis.set(key, json.dumps(record.to_dict()))
+            return record
+
+        return None
+
+    async def save_env(self, record: EnvironmentRecord) -> None:
+        """Persist environment record to Redis and PostgreSQL."""
+        key = self._env_key(record.user_id)
+        await self._redis.set(key, json.dumps(record.to_dict()))
+
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO cappy_environments
+                    (user_id, container_id, container_ip, workspace_repo)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (user_id) DO UPDATE
+                    SET container_id   = EXCLUDED.container_id,
+                        container_ip   = EXCLUDED.container_ip,
+                        workspace_repo = EXCLUDED.workspace_repo,
+                        last_active    = NOW()
+                """,
+                record.user_id,
+                record.container_id,
+                record.container_ip,
+                record.workspace_repo,
+            )
+
+    async def delete_env(self, user_id: str) -> None:
+        """Remove environment record from both stores."""
+        await self._redis.delete(self._env_key(user_id))
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM cappy_environments WHERE user_id=$1",
+                user_id,
+            )
+
+    # ── Session CRUD ─────────────────────────────────────────────
 
     async def get(self, user_id: str, chat_id: str) -> Optional[SandboxRecord]:
-        """Return sandbox record from Redis cache, or fall back to PostgreSQL."""
-        key = self._key(user_id, chat_id)
+        """Return session record from Redis cache, or fall back to PostgreSQL."""
+        key = self._session_key(user_id, chat_id)
 
         raw = await self._redis.get(key)
         if raw:
@@ -100,29 +194,30 @@ class SessionStore:
             )
         if row:
             record = SandboxRecord.from_dict(dict(row))
-            # Re-hydrate Redis cache
             await self._redis.setex(key, self._idle_ttl, json.dumps(record.to_dict()))
             return record
 
         return None
 
     async def save(self, record: SandboxRecord) -> None:
-        """Persist sandbox record to Redis (with TTL) and PostgreSQL."""
-        key = self._key(record.user_id, record.chat_id)
+        """Persist session record to Redis (with TTL) and PostgreSQL."""
+        key = self._session_key(record.user_id, record.chat_id)
         await self._redis.setex(key, self._idle_ttl, json.dumps(record.to_dict()))
 
         async with self._pool.acquire() as conn:
             await conn.execute(
                 """
                 INSERT INTO cappy_sessions
-                    (user_id, chat_id, container_id, container_ip, grpc_port, workspace_repo)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                    (user_id, chat_id, container_id, container_ip, grpc_port,
+                     workspace_repo, worktree_path)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 ON CONFLICT (user_id, chat_id) DO UPDATE
-                    SET container_id  = EXCLUDED.container_id,
-                        container_ip  = EXCLUDED.container_ip,
-                        grpc_port     = EXCLUDED.grpc_port,
+                    SET container_id   = EXCLUDED.container_id,
+                        container_ip   = EXCLUDED.container_ip,
+                        grpc_port      = EXCLUDED.grpc_port,
                         workspace_repo = EXCLUDED.workspace_repo,
-                        last_active   = NOW()
+                        worktree_path  = EXCLUDED.worktree_path,
+                        last_active    = NOW()
                 """,
                 record.user_id,
                 record.chat_id,
@@ -130,11 +225,12 @@ class SessionStore:
                 record.container_ip,
                 record.grpc_port,
                 record.workspace_repo,
+                record.worktree_path,
             )
 
     async def refresh_ttl(self, user_id: str, chat_id: str) -> None:
-        """Reset idle TTL so the sandbox stays alive after activity."""
-        key = self._key(user_id, chat_id)
+        """Reset idle TTL so the session stays alive after activity."""
+        key = self._session_key(user_id, chat_id)
         await self._redis.expire(key, self._idle_ttl)
         async with self._pool.acquire() as conn:
             await conn.execute(
@@ -144,8 +240,8 @@ class SessionStore:
             )
 
     async def delete(self, user_id: str, chat_id: str) -> None:
-        """Remove sandbox record from both stores."""
-        key = self._key(user_id, chat_id)
+        """Remove session record from both stores."""
+        key = self._session_key(user_id, chat_id)
         await self._redis.delete(key)
         async with self._pool.acquire() as conn:
             await conn.execute(
@@ -154,15 +250,24 @@ class SessionStore:
                 chat_id,
             )
 
-    async def list_expired_containers(self) -> list[dict]:
-        """Return DB rows whose Redis key has already expired (i.e., idle > TTL)."""
+    async def list_expired_sessions(self) -> list[dict]:
+        """Return session DB rows whose idle TTL has expired."""
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT user_id, chat_id, container_id
+                SELECT user_id, chat_id, container_id, worktree_path
                 FROM   cappy_sessions
                 WHERE  last_active < NOW() - make_interval(secs => $1)
                 """,
                 float(self._idle_ttl),
+            )
+        return [dict(r) for r in rows]
+
+    async def list_sessions_for_env(self, user_id: str) -> list[dict]:
+        """Return all active sessions for a given environment (user)."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT user_id, chat_id, worktree_path FROM cappy_sessions WHERE user_id=$1",
+                user_id,
             )
         return [dict(r) for r in rows]

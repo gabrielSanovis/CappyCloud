@@ -5,6 +5,11 @@
 # GRPC_HOST / GRPC_PORT env vars) and provides a git-enabled
 # workspace environment.
 #
+# Architecture:
+#   One container per user (persistent environment).
+#   One openclaude gRPC server handles all sessions in the container.
+#   Each conversation gets its own git worktree created via docker exec.
+#
 # Build once:
 #   docker build -t cappycloud-sandbox:latest ./services/sandbox
 # ──────────────────────────────────────────────────────────────
@@ -44,13 +49,19 @@ RUN mkdir -p /workspace
 WORKDIR /workspace
 
 # ── Agent instructions injected into every workspace ──────────
-# CLAUDE.md is placed at /workspace root after git clone so openclaude
+# CLAUDE.md is placed in each worktree by session_start.sh so openclaude
 # picks it up automatically as its context file.
 COPY CLAUDE.md /app/CLAUDE.md
 
-# ── Entrypoint ────────────────────────────────────────────────
-COPY entrypoint.sh /entrypoint.sh
-# Fix Windows CRLF line endings → LF so bash can execute the script on Linux
-RUN sed -i 's/\r//' /entrypoint.sh && chmod +x /entrypoint.sh
+# ── Entrypoints ───────────────────────────────────────────────
+# env_init.sh  — runs once when the persistent container starts:
+#                clones the base repo + starts the single gRPC server
+# session_start.sh — called via `docker exec` for each new conversation:
+#                    creates a git worktree at /workspace/sessions/<id>
+COPY env_init.sh /env_init.sh
+COPY session_start.sh /session_start.sh
+# Fix Windows CRLF line endings → LF so bash can execute scripts on Linux
+RUN sed -i 's/\r//' /env_init.sh /session_start.sh \
+    && chmod +x /env_init.sh /session_start.sh
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/env_init.sh"]

@@ -1,4 +1,4 @@
-"""Agente CappyCloud (sandbox Docker + gRPC OpenClaude)."""
+"""Agente CappyCloud (ambiente persistente por utilizador + worktrees git por sessão)."""
 
 from .cappycloud_pipeline import Pipeline
 
