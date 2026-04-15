@@ -156,6 +156,9 @@ class FakeAgent(AgentPort):
     def wake_env(self, user_id: str) -> None:
         pass
 
+    def destroy_env(self, env_slug: str) -> None:
+        pass
+
 
 # ---------------------------------------------------------------------------
 # Pytest Fixtures
