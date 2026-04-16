@@ -274,4 +274,3 @@ async def list_diff_comments(
         }
         for r in rows.fetchall()
     ]
-
