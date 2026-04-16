@@ -45,6 +45,9 @@ class Conversation:
     environment_id: uuid.UUID | None = None
     env_slug: str | None = None
     base_branch: str | None = None
+    # Immutable once set — computed at creation time from id + env_slug.
+    worktree_branch: str | None = None
+    worktree_path: str | None = None
 
 
 @dataclass

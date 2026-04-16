@@ -92,6 +92,7 @@ class ConversationCreate(BaseModel):
     title: str | None = Field(default="Nova conversa", max_length=512)
     environment_id: uuid.UUID | None = None
     base_branch: str | None = Field(default=None, max_length=255)
+    env_slug: str | None = Field(default=None, max_length=128)
 
 
 class ConversationOut(BaseModel):
@@ -104,6 +105,8 @@ class ConversationOut(BaseModel):
     environment_id: uuid.UUID | None = None
     env_slug: str | None = None
     base_branch: str | None = None
+    worktree_branch: str | None = None
+    worktree_path: str | None = None
 
     model_config = {"from_attributes": True}
 

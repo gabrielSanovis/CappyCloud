@@ -20,6 +20,7 @@ from app.adapters.primary.http import environments as env_router
 from app.adapters.primary.http import routines as routines_router
 from app.adapters.primary.http import tasks as tasks_router
 from app.adapters.primary.http import webhooks as webhooks_router
+from app.adapters.primary.http import workspaces as workspaces_router
 from app.infrastructure.config import cors_origins_list, get_settings
 from app.infrastructure.database import init_db
 
@@ -117,6 +118,7 @@ app.include_router(env_router.router, prefix="/api")
 app.include_router(routines_router.router, prefix="/api")
 app.include_router(tasks_router.router, prefix="/api")
 app.include_router(webhooks_router.router, prefix="/api")
+app.include_router(workspaces_router.router, prefix="/api")
 
 
 @app.get("/health")

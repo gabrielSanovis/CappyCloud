@@ -57,7 +57,7 @@ async def create_conversation(
     title = body.title if body and body.title else None
     environment_id = body.environment_id if body else None
     base_branch = body.base_branch if body else None
-    conv = await uc.execute(current.id, title, environment_id, base_branch)
+    conv = await uc.execute(current.id, title, environment_id, base_branch, body.env_slug if body else None)
     return ConversationOut(
         id=conv.id,
         title=conv.title,

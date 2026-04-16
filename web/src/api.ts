@@ -90,6 +90,24 @@ export function setToken(token: string | null): void {
   else localStorage.removeItem(TOKEN_KEY)
 }
 
+/** Lançado quando a API responde 401. Sinaliza que o token expirou ou é inválido. */
+export class AuthError extends Error {
+  constructor() {
+    super('Sessão expirada. Por favor, faça login novamente.')
+    this.name = 'AuthError'
+  }
+}
+
+/**
+ * Wrapper sobre `fetch` que lança `AuthError` em 401
+ * e erros genéricos nos outros casos de falha.
+ */
+async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+  const res = await fetch(url, init)
+  if (res.status === 401) throw new AuthError()
+  return res
+}
+
 export async function loginRequest(email: string, password: string): Promise<string> {
   const body = new URLSearchParams()
   body.set('username', email)
@@ -174,7 +192,7 @@ export interface StreamHandlers {
 }
 
 export async function fetchConversations(token: string): Promise<Conversation[]> {
-  const res = await fetch('/api/conversations', {
+  const res = await apiFetch('/api/conversations', {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error('Não foi possível carregar conversas')
@@ -184,9 +202,10 @@ export async function fetchConversations(token: string): Promise<Conversation[]>
 export async function createConversation(
   token: string,
   environmentId?: string | null,
-  baseBranch?: string | null
+  baseBranch?: string | null,
+  envSlug?: string | null,
 ): Promise<Conversation> {
-  const res = await fetch('/api/conversations', {
+  const res = await apiFetch('/api/conversations', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -195,6 +214,7 @@ export async function createConversation(
     body: JSON.stringify({
       environment_id: environmentId ?? null,
       base_branch: baseBranch ?? null,
+      env_slug: envSlug ?? null,
     }),
   })
   if (!res.ok) throw new Error('Não foi possível criar conversa')
@@ -202,7 +222,7 @@ export async function createConversation(
 }
 
 export async function fetchMessages(token: string, conversationId: string): Promise<ChatMessage[]> {
-  const res = await fetch(`/api/conversations/${conversationId}/messages`, {
+  const res = await apiFetch(`/api/conversations/${conversationId}/messages`, {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error('Não foi possível carregar mensagens')
@@ -220,7 +240,7 @@ export async function streamAssistantReply(
   handlers: StreamHandlers
 ): Promise<void> {
   const { signal, ...eventHandlers } = handlers
-  const res = await fetch(`/api/conversations/${conversationId}/messages/stream`, {
+  const res = await apiFetch(`/api/conversations/${conversationId}/messages/stream`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -319,21 +339,18 @@ export type RepoEnvCreate = {
  * Lista todos os ambientes de repositório globais.
  */
 export async function fetchRepoEnvironments(token: string): Promise<RepoEnv[]> {
-  const res = await fetch('/api/environments', {
+  const res = await apiFetch('/api/environments', {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error('Não foi possível carregar ambientes')
   return res.json()
 }
 
-/**
- * Cria um novo ambiente de repositório global.
- */
 export async function createRepoEnvironment(
   token: string,
   data: RepoEnvCreate
 ): Promise<RepoEnv> {
-  const res = await fetch('/api/environments', {
+  const res = await apiFetch('/api/environments', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -348,11 +365,8 @@ export async function createRepoEnvironment(
   return res.json()
 }
 
-/**
- * Remove um ambiente de repositório global.
- */
 export async function deleteRepoEnvironment(token: string, envId: string): Promise<void> {
-  const res = await fetch(`/api/environments/${envId}`, {
+  const res = await apiFetch(`/api/environments/${envId}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` },
   })
@@ -411,7 +425,7 @@ export async function wakeEnvironment(_token: string): Promise<void> {
 
 export async function cancelConversation(token: string, conversationId: string): Promise<boolean> {
   try {
-    const res = await fetch(`/api/conversations/${conversationId}/cancel`, {
+    const res = await apiFetch(`/api/conversations/${conversationId}/cancel`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -449,24 +463,47 @@ export interface ConversationDiff {
   files: DiffFile[]
 }
 
+export interface Workspace {
+  slug: string
+  name: string
+  url: string
+}
+
+export async function fetchWorkspaces(token: string): Promise<Workspace[]> {
+  const res = await apiFetch('/api/workspaces', {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) return []
+  return res.json()
+}
+
+export async function fetchBranches(
+  token: string,
+  slug: string,
+): Promise<{ branches: string[]; default: string }> {
+  const res = await apiFetch(`/api/workspaces/${encodeURIComponent(slug)}/branches`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) return { branches: ['main'], default: 'main' }
+  return res.json()
+}
+
 export async function fetchConversationDiff(
   token: string,
   conversationId: string
 ): Promise<ConversationDiff> {
-  const res = await fetch(`/api/conversations/${conversationId}/diff`, {
+  const res = await apiFetch(`/api/conversations/${conversationId}/diff`, {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error('Erro ao carregar diff')
   return res.json()
 }
 
-// ── File explorer ─────────────────────────────────────────────────────────────
-
 export async function fetchConversationFiles(
   token: string,
   conversationId: string
 ): Promise<{ worktree_path: string; files: string[] }> {
-  const res = await fetch(`/api/conversations/${conversationId}/files`, {
+  const res = await apiFetch(`/api/conversations/${conversationId}/files`, {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error('Erro ao listar ficheiros')
@@ -478,7 +515,7 @@ export async function fetchConversationFile(
   conversationId: string,
   path: string
 ): Promise<{ path: string; content: string }> {
-  const res = await fetch(
+  const res = await apiFetch(
     `/api/conversations/${conversationId}/file?path=${encodeURIComponent(path)}`,
     { headers: { Authorization: `Bearer ${token}` } }
   )
@@ -499,7 +536,7 @@ export async function createConversationPr(
   conversationId: string,
   title?: string
 ): Promise<CreatePrResult> {
-  const res = await fetch(`/api/conversations/${conversationId}/create-pr`, {
+  const res = await apiFetch(`/api/conversations/${conversationId}/create-pr`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,

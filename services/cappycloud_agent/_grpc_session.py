@@ -91,8 +91,47 @@ class GrpcSession:
     # ── Startup ──────────────────────────────────────────────────
 
     async def start(self, message: str) -> None:
-        """Open the gRPC channel, seed the first ChatRequest, launch the Task."""
-        self._channel = grpc.aio.insecure_channel(f"{self._ip}:{self._port}")
+        """Open the gRPC channel, seed the first ChatRequest, launch the Task.
+
+        Retries the channel connection up to _CONNECT_RETRIES times so that
+        transient gRPC failures (e.g. sandbox restarting) do not permanently
+        break a conversation.
+        """
+        _CONNECT_RETRIES = 4
+        _RETRY_DELAY = [1.0, 2.0, 4.0]  # seconds between retries
+
+        last_exc: Exception | None = None
+        for attempt in range(_CONNECT_RETRIES):
+            try:
+                channel = grpc.aio.insecure_channel(
+                    f"{self._ip}:{self._port}",
+                    options=[
+                        ("grpc.keepalive_time_ms", 10_000),
+                        ("grpc.keepalive_timeout_ms", 5_000),
+                        ("grpc.keepalive_permit_without_calls", True),
+                    ],
+                )
+                # Probe the channel before committing to it.
+                await asyncio.wait_for(channel.channel_ready(), timeout=8.0)
+                self._channel = channel
+                break
+            except Exception as exc:
+                last_exc = exc
+                log.warning(
+                    "[%s] gRPC channel not ready (attempt %d/%d): %s",
+                    self._session_id,
+                    attempt + 1,
+                    _CONNECT_RETRIES,
+                    exc,
+                )
+                if attempt < len(_RETRY_DELAY):
+                    await asyncio.sleep(_RETRY_DELAY[attempt])
+        else:
+            raise RuntimeError(
+                f"Não foi possível conectar ao sandbox gRPC após {_CONNECT_RETRIES} "
+                f"tentativas ({self._ip}:{self._port}). Último erro: {last_exc}"
+            )
+
         stub = openclaude_pb2_grpc.AgentServiceStub(self._channel)
 
         await self._req_queue.put(
@@ -248,14 +287,9 @@ class GrpcSession:
                     await self._out_queue.put(("action_required", action))
 
                 elif event == "done":
-                    # Alguns builds do openclaude só preenchem `full_text` no evento final,
-                    # sem enviar `text_chunk` — antes ignorávamos isso e o chat ficava vazio.
                     done = msg.done
-                    full = (done.full_text or "").strip()
-                    if full and not streamed_text:
-                        await self._out_queue.put(("text", full))
-                        streamed_text = True
-                    # 0 tokens + no text = LLM API call never happened (rate limit / quota)
+                    # full_text foi removido do proto (reserved 1) — o texto já foi acumulado
+                    # via text_chunk events. Se nenhum chunk chegou mas tokens = 0, é rate limit.
                     if not streamed_text and done.prompt_tokens == 0 and done.completion_tokens == 0:
                         log.warning(
                             "[%s] Done with 0 tokens and no text — LLM call likely failed (rate limit or quota)",
@@ -263,8 +297,10 @@ class GrpcSession:
                         )
                         await self._out_queue.put((
                             "error",
-                            "O modelo não gerou resposta (possível rate limit do OpenRouter). "
-                            "Aguarda alguns segundos e tenta novamente, ou altera o modelo em OPENROUTER_MODEL.",
+                            "O modelo não respondeu (rate limit ou cota esgotada). "
+                            "Aguarde alguns segundos e tente novamente. "
+                            "Para evitar este problema, use um modelo com limite maior em OPENROUTER_MODEL "
+                            "(ex.: openai/gpt-4o-mini ou anthropic/claude-3-haiku).",
                         ))
                         received_done = True
                         return
@@ -295,8 +331,15 @@ class GrpcSession:
                 await self._out_queue.put(("error", "O agente encerrou a conexão inesperadamente (possível rate limit ou timeout do modelo)."))
 
         except grpc.aio.AioRpcError as exc:
-            log.error("[%s] gRPC error: %s", self._session_id, exc.details())
-            await self._out_queue.put(("error", exc.details()))
+            details = exc.details() or str(exc)
+            log.error("[%s] gRPC error: %s", self._session_id, details)
+            if "Socket closed" in details or "UNAVAILABLE" in exc.code().name:
+                await self._out_queue.put((
+                    "error",
+                    "Conexão com o sandbox perdida. Envie sua mensagem novamente para reconectar.",
+                ))
+            else:
+                await self._out_queue.put(("error", details))
         except asyncio.CancelledError:
             log.info("[%s] Session cancelled", self._session_id)
         except Exception as exc:

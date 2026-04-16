@@ -54,13 +54,22 @@ class CreateConversation:
         title: str | None = None,
         environment_id: uuid.UUID | None = None,
         base_branch: str | None = None,
+        env_slug: str | None = None,
     ) -> Conversation:
+        conv_id = uuid.uuid4()
+        slug = env_slug or "default"
+        short_id = conv_id.hex[:12]
+
         conv = Conversation(
-            id=uuid.uuid4(),
+            id=conv_id,
             user_id=user_id,
             title=title or _DEFAULT_TITLE,
             environment_id=environment_id,
             base_branch=base_branch,
+            env_slug=slug,
+            # Immutable identifiers — set once at creation, never change.
+            worktree_branch=f"cappy/{slug}/{short_id}",
+            worktree_path=f"/repos/{slug}/sessions/{short_id}",
         )
         return await self._conversations.save(conv)
 
@@ -163,6 +172,8 @@ class StreamMessage:
             "user": {"id": str(user_id)},
             "env_slug": conv.env_slug or "default",
             "base_branch": base_branch,
+            "worktree_branch": conv.worktree_branch or "",
+            "worktree_path": conv.worktree_path or "",
             "cursor": cursor,  # passed through to pipe() for SSE resumption
         }
 
