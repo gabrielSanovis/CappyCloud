@@ -1,4 +1,4 @@
-"""Conversation and environment use cases — business logic for chat management.
+"""Conversation and messaging use cases — business logic for chat management.
 
 No FastAPI, no SQLAlchemy. All dependencies injected via ports (ABCs).
 """
@@ -10,12 +10,11 @@ import json
 import uuid
 from collections.abc import AsyncGenerator
 
-from app.domain.entities import Conversation, Message, RepoEnvironment
+from app.domain.entities import Conversation, Message
 from app.ports.agent import AgentPort
 from app.ports.repositories import (
     ConversationRepository,
     MessageRepository,
-    RepoEnvironmentRepository,  # used by Repo Environment use cases only
 )
 
 _TITLE_MAX_LEN = 80
@@ -28,64 +27,6 @@ def _next_chunk(gen):
         return next(gen)
     except StopIteration:
         return None
-
-
-# ── Repo Environment use cases ───────────────────────────────────────────────
-
-
-class ListRepoEnvironments:
-    """Return all global repo environments."""
-
-    def __init__(self, repo_envs: RepoEnvironmentRepository) -> None:
-        self._repo_envs = repo_envs
-
-    async def execute(self) -> list[RepoEnvironment]:
-        return await self._repo_envs.list_all()
-
-
-class CreateRepoEnvironment:
-    """Create a new global repo environment."""
-
-    def __init__(self, repo_envs: RepoEnvironmentRepository) -> None:
-        self._repo_envs = repo_envs
-
-    async def execute(
-        self,
-        slug: str,
-        name: str,
-        repo_url: str,
-        branch: str = "main",
-    ) -> RepoEnvironment:
-        existing = await self._repo_envs.get_by_slug(slug)
-        if existing:
-            raise ValueError(f"Ambiente com slug '{slug}' já existe.")
-        env = RepoEnvironment(
-            id=uuid.uuid4(),
-            slug=slug,
-            name=name,
-            repo_url=repo_url,
-            branch=branch,
-        )
-        return await self._repo_envs.save(env)
-
-
-class DeleteRepoEnvironment:
-    """Delete a global repo environment."""
-
-    def __init__(
-        self,
-        repo_envs: RepoEnvironmentRepository,
-        agent: AgentPort,
-    ) -> None:
-        self._repo_envs = repo_envs
-        self._agent = agent
-
-    async def execute(self, env_id: uuid.UUID) -> None:
-        env = await self._repo_envs.get(env_id)
-        if not env:
-            raise LookupError("Ambiente não encontrado.")
-        self._agent.destroy_env(env.slug)
-        await self._repo_envs.delete(env_id)
 
 
 # ── Conversation use cases ────────────────────────────────────────────────────

@@ -27,12 +27,14 @@ from app.adapters.secondary.persistence.sqlalchemy_user_repo import (
 from app.application.use_cases.auth import GetCurrentUser, LoginUser, RegisterUser
 from app.application.use_cases.conversations import (
     CreateConversation,
-    CreateRepoEnvironment,
-    DeleteRepoEnvironment,
     ListConversations,
     ListMessages,
-    ListRepoEnvironments,
     StreamMessage,
+)
+from app.application.use_cases.repo_environments import (
+    CreateRepoEnvironment,
+    DeleteRepoEnvironment,
+    ListRepoEnvironments,
 )
 from app.domain.entities import User
 from app.infrastructure.database import get_db
