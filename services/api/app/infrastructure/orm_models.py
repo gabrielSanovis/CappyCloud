@@ -1,6 +1,8 @@
 """ORM models — SQLAlchemy mapped classes for users, conversations and messages.
 
 Named orm_models.py (not models.py) to avoid collision with domain/entities.py.
+Agent execution models live in orm_models_agent.py (imported below to register them
+with Base.metadata for Alembic).
 """
 
 from __future__ import annotations
@@ -8,7 +10,15 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator, Uuid
 
@@ -43,6 +53,20 @@ class UUIDType(TypeDecorator[uuid.UUID]):
         return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
 
 
+class JSONBType(TypeDecorator):
+    """JSONB on PostgreSQL, JSON on SQLite (for tests)."""
+
+    impl = JSONB
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "sqlite":
+            from sqlalchemy import JSON
+
+            return dialect.type_descriptor(JSON())
+        return dialect.type_descriptor(JSONB())
+
+
 class RepoEnvironment(Base):
     """Ambiente global (repositório git) partilhado por todos os utilizadores."""
 
@@ -58,6 +82,7 @@ class RepoEnvironment(Base):
     conversations: Mapped[list[Conversation]] = relationship(
         "Conversation", back_populates="environment"
     )
+    routines: Mapped[list["Routine"]] = relationship("Routine", back_populates="environment")
 
 
 class User(Base):
@@ -72,6 +97,9 @@ class User(Base):
 
     conversations: Mapped[list[Conversation]] = relationship(
         "Conversation", back_populates="user", cascade="all, delete-orphan"
+    )
+    routines: Mapped[list["Routine"]] = relationship(
+        "Routine", back_populates="created_by_user", cascade="all, delete-orphan"
     )
 
 
@@ -92,6 +120,8 @@ class Conversation(Base):
     )
     title: Mapped[str] = mapped_column(String(512), default="Nova conversa")
     base_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    github_pr_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    github_repo_slug: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -103,6 +133,15 @@ class Conversation(Base):
     )
     messages: Mapped[list[Message]] = relationship(
         "Message", back_populates="conversation", cascade="all, delete-orphan"
+    )
+    agent_tasks: Mapped[list["AgentTask"]] = relationship(
+        "AgentTask", back_populates="conversation", cascade="all, delete-orphan"
+    )
+    diff_comments: Mapped[list["DiffComment"]] = relationship(
+        "DiffComment", back_populates="conversation", cascade="all, delete-orphan"
+    )
+    pr_subscriptions: Mapped[list["PrSubscription"]] = relationship(
+        "PrSubscription", back_populates="conversation", cascade="all, delete-orphan"
     )
 
 
@@ -123,3 +162,15 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="messages")
+
+
+# Import agent models last so Base.metadata contains all tables for Alembic.
+from app.infrastructure.orm_models_agent import (  # noqa: F401, E402
+    AgentEvent,
+    AgentTask,
+    CicdEvent,
+    DiffComment,
+    PrSubscription,
+    Routine,
+    RoutineRun,
+)

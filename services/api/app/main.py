@@ -12,8 +12,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.adapters.primary.http import auth as auth_router
+from app.adapters.primary.http import conversation_diff as conv_diff_router
+from app.adapters.primary.http import conversation_pr as conv_pr_router
 from app.adapters.primary.http import conversations as conv_router
 from app.adapters.primary.http import environments as env_router
+from app.adapters.primary.http import routines as routines_router
+from app.adapters.primary.http import tasks as tasks_router
+from app.adapters.primary.http import webhooks as webhooks_router
 from app.infrastructure.config import cors_origins_list, get_settings
 from app.infrastructure.database import init_db
 
@@ -25,14 +30,24 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Arranca o pipeline do agente e inicializa a base de dados."""
+    """Arranca o pipeline do agente, APScheduler e inicializa a base de dados."""
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
     from app.adapters.secondary.agent.pipeline_adapter import PipelineAdapter
 
     await init_db()
+
     agent = PipelineAdapter()
     await agent.on_startup()
     app.state.agent = agent
+
+    scheduler = AsyncIOScheduler()
+    scheduler.start()
+    app.state.scheduler = scheduler
+
     yield
+
+    scheduler.shutdown(wait=False)
     await agent.on_shutdown()
 
 
@@ -94,7 +109,12 @@ app.add_middleware(
 
 app.include_router(auth_router.router, prefix="/api")
 app.include_router(conv_router.router, prefix="/api")
+app.include_router(conv_diff_router.router, prefix="/api")
+app.include_router(conv_pr_router.router, prefix="/api")
 app.include_router(env_router.router, prefix="/api")
+app.include_router(routines_router.router, prefix="/api")
+app.include_router(tasks_router.router, prefix="/api")
+app.include_router(webhooks_router.router, prefix="/api")
 
 
 @app.get("/health")

@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 
 from app.adapters.primary.http.deps import (
@@ -69,10 +69,7 @@ async def create_conversation(
     )
 
 
-@router.get(
-    "/{conversation_id}/messages",
-    response_model=list[MessageOut],
-)
+@router.get("/{conversation_id}/messages", response_model=list[MessageOut])
 async def list_messages(
     conversation_id: uuid.UUID,
     current: Annotated[User, Depends(get_authenticated_user)],
@@ -94,10 +91,18 @@ async def stream_message(
     body: SendMessageBody,
     current: Annotated[User, Depends(get_authenticated_user)],
     uc: Annotated[StreamMessage, Depends(get_stream_msg_uc)],
+    cursor: int | None = Query(
+        default=None,
+        description="Último agent_event.id recebido (para reconexão)",
+    ),
 ) -> StreamingResponse:
-    """Envia mensagem e devolve resposta do agente em SSE chunks."""
+    """Envia mensagem e devolve resposta do agente em SSE.
+
+    Suporta reconexão via `cursor`: ao passar o último `agent_event.id` recebido,
+    o stream retoma a partir desse ponto sem perder eventos.
+    """
     try:
-        stream = await uc.execute(conversation_id, current.id, body.content)
+        stream = await uc.execute(conversation_id, current.id, body.content, cursor=cursor)
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return StreamingResponse(

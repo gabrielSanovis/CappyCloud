@@ -34,6 +34,29 @@ class PipelineAdapter(AgentPort):
         result = self._pipeline.pipe(user_message, model_id, messages, body)
         return cast(Generator[str, None, None], result)
 
+    async def dispatch(
+        self,
+        prompt: str,
+        env_slug: str,
+        conversation_id: str | None = None,
+        triggered_by: str = "system",
+        trigger_payload: dict | None = None,
+        base_branch: str = "",
+    ) -> str | None:
+        """Dispatch a task via the TaskDispatcher and return task_id."""
+        dispatcher = self._pipeline._dispatcher
+        if dispatcher is None:
+            return None
+        result = await dispatcher.dispatch(
+            prompt=prompt,
+            env_slug=env_slug,
+            conversation_id=conversation_id,
+            triggered_by=triggered_by,
+            trigger_payload=trigger_payload or {},
+            base_branch=base_branch,
+        )
+        return result if isinstance(result, str) else None
+
     async def on_startup(self) -> None:
         """Initialise the Pipeline (connects to Docker, Redis, PostgreSQL)."""
         await self._pipeline.on_startup()

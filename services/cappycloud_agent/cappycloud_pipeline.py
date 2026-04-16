@@ -1,98 +1,40 @@
 """
-CappyCloud Agent Pipeline — Global Environments with Git Worktrees
+CappyCloud Agent Pipeline — DB-backed, UI-independent agent lifecycle.
 
 Key behaviours:
-  - Each env_slug maps to ONE persistent environment container (global, not per-user).
+  - Each env_slug maps to ONE persistent environment container.
   - Each (user_id, chat_id) gets its own git worktree inside the env container.
-  - A single openclaude gRPC server per container handles all sessions;
-    each ChatRequest carries working_directory → the session's worktree path.
-  - GrpcSession is persistent: the gRPC stream stays open between pipe() calls.
-  - When openclaude emits ActionRequired, the stream PAUSES and the user sees
-    a formatted choice prompt in the chat.
-  - The user's next message is detected as a reply and routed back to the stream.
+  - Agent execution is managed by TaskDispatcher + TaskRunner, fully decoupled from HTTP.
+  - pipe() dispatches a task and streams agent_events from the DB with SSE cursor.
 """
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
-import re
 from collections.abc import Generator
-from queue import Empty, Queue
 from typing import Optional
 
 from pydantic import BaseModel, Field
 
 from ._environment_manager import EnvironmentManager
-from ._grpc_session import GrpcSession, PendingAction, _DONE
 from ._session_store import SessionStore
+from ._task_dispatcher import TaskDispatcher
 
 log = logging.getLogger(__name__)
 
 
-def _agent_database_url() -> str:
-    """URL PostgreSQL para o SessionStore (sem prefixo SQLAlchemy ``+asyncpg``)."""
+def _db_url() -> str:
     explicit = os.getenv("PIPELINE_DATABASE_URL", "").strip()
     if explicit:
         return explicit
-    fallback = os.getenv("DATABASE_URL", "")
-    return fallback.replace("postgresql+asyncpg://", "postgresql://", 1)
-
-
-def _stable_chat_id(messages: list[dict]) -> str:
-    """SHA-1 of the first user message → fallback chat identifier."""
-    first = next(
-        (m.get("content", "") for m in messages if m.get("role") == "user"),
-        "",
-    )
-    if isinstance(first, list):
-        first = " ".join(p.get("text", "") for p in first if isinstance(p, dict))
-    return hashlib.sha1(first[:300].encode()).hexdigest()[:16]
-
-
-def _chat_id_from_body(body: dict, messages: list) -> str:
-    """Prefer explicit conversation id from the API (PostgreSQL), else legacy hash."""
-    explicit = body.get("conversation_id") or body.get("chat_id")
-    if explicit:
-        return str(explicit)
-    return _stable_chat_id(messages)
-
-
-def _user_id_from_body(body: dict) -> str:
-    """Resolve user id for the (user_id, chat_id) pair."""
-    raw = body.get("user")
-    if raw is None:
-        return str(body.get("user_id") or "anonymous")
-    if isinstance(raw, dict):
-        return str(raw.get("id") or body.get("user_id") or "anonymous")
-    return str(raw)
-
-
-def _env_slug_from_body(body: dict) -> str:
-    """Resolve environment slug from body, defaulting to 'default'."""
-    return str(body.get("env_slug") or "default")
-
-
-def _base_branch_from_body(body: dict) -> str:
-    """Resolve base branch for the session worktree (selected by user in UI).
-
-    Empty string signals 'use canonical default from repo_environments',
-    which EnvironmentManager resolves internally.
-    """
-    return str(body.get("base_branch") or "")
+    return os.getenv("DATABASE_URL", "").replace("postgresql+asyncpg://", "postgresql://", 1)
 
 
 def _sse(payload: dict) -> str:
-    """Format a dict as a single SSE data line."""
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
-
-def _clean_question(question: str) -> str:
-    """Remove bracket-formatted choices from question string."""
-    return re.sub(r"\s*\[[^\]]+\]", "", question).strip()
 
 
 class Pipeline:
@@ -113,9 +55,7 @@ class Pipeline:
         self.name = "CappyCloud Agent"
         self.valves = self.Valves(
             OPENROUTER_API_KEY=os.getenv("OPENROUTER_API_KEY", ""),
-            OPENROUTER_MODEL=os.getenv(
-                "OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet"
-            ),
+            OPENROUTER_MODEL=os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet"),
             GIT_AUTH_TOKEN=os.getenv("GIT_AUTH_TOKEN", ""),
             SANDBOX_IMAGE=os.getenv("SANDBOX_IMAGE", "cappycloud-sandbox:latest"),
             DOCKER_NETWORK=os.getenv("DOCKER_NETWORK", "cappycloud_net"),
@@ -123,29 +63,24 @@ class Pipeline:
             SANDBOX_IDLE_TIMEOUT=int(os.getenv("SANDBOX_IDLE_TIMEOUT", "1800")),
             ENV_IDLE_TIMEOUT=int(os.getenv("ENV_IDLE_TIMEOUT", "3600")),
             REDIS_URL=os.getenv("REDIS_URL", "redis://redis:6379"),
-            DATABASE_URL=_agent_database_url(),
+            DATABASE_URL=_db_url(),
             CODE_INDEXER_URL=os.getenv("CODE_INDEXER_URL", ""),
         )
-
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._store: Optional[SessionStore] = None
         self._env_manager: Optional[EnvironmentManager] = None
+        self._dispatcher: Optional[TaskDispatcher] = None
         self._gc_task: Optional[asyncio.Task] = None
-
-        # In-memory map of live gRPC sessions: (user_id, chat_id) → GrpcSession
-        self._sessions: dict[tuple[str, str], GrpcSession] = {}
 
     async def on_startup(self) -> None:
         log.info("CappyCloud agent pipeline starting…")
         self._loop = asyncio.get_running_loop()
-
         self._store = SessionStore(
             redis_url=self.valves.REDIS_URL,
             database_url=self.valves.DATABASE_URL,
             idle_ttl=self.valves.SANDBOX_IDLE_TIMEOUT,
         )
         await self._store.connect()
-
         self._env_manager = EnvironmentManager(
             session_store=self._store,
             sandbox_image=self.valves.SANDBOX_IMAGE,
@@ -156,17 +91,21 @@ class Pipeline:
             git_auth_token=self.valves.GIT_AUTH_TOKEN,
             code_indexer_url=self.valves.CODE_INDEXER_URL,
         )
-
+        self._dispatcher = TaskDispatcher(
+            env_manager=self._env_manager,
+            session_store=self._store,
+            db_url=self.valves.DATABASE_URL,
+            openrouter_model=self.valves.OPENROUTER_MODEL,
+        )
+        await self._dispatcher.start()
         self._gc_task = asyncio.create_task(self._gc_loop())
-        log.info("CappyCloud agent ready (global env model).")
+        log.info("CappyCloud agent ready.")
 
     async def on_shutdown(self) -> None:
-        log.info("CappyCloud agent pipeline shutting down…")
         if self._gc_task:
             self._gc_task.cancel()
-        for session in list(self._sessions.values()):
-            await session.close()
-        self._sessions.clear()
+        if self._dispatcher:
+            await self._dispatcher.stop()
         if self._store:
             await self._store.close()
 
@@ -176,31 +115,21 @@ class Pipeline:
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result(timeout=timeout)
 
     def get_env_status(self, env_slug: str) -> dict:
-        """Return the current environment status for a slug."""
         if self._env_manager is None:
             return {"status": "none", "container_id": None}
         return self._run(self._env_manager.get_env_status(env_slug), timeout=30)
 
     def wake_env(self, env_slug: str) -> None:
-        """Trigger environment creation or restart (fire-and-forget).
-
-        repo_url and branch are resolved internally by EnvironmentManager.
-        """
-        if self._loop is None or self._env_manager is None:
-            return
-        asyncio.run_coroutine_threadsafe(
-            self._env_manager._get_or_create_env(env_slug),
-            self._loop,
-        )
+        if self._loop and self._env_manager:
+            asyncio.run_coroutine_threadsafe(
+                self._env_manager._get_or_create_env(env_slug), self._loop
+            )
 
     def destroy_env(self, env_slug: str) -> None:
-        """Stop and remove environment container for a slug (fire-and-forget)."""
-        if self._loop is None or self._env_manager is None:
-            return
-        asyncio.run_coroutine_threadsafe(
-            self._env_manager.destroy_env(env_slug),
-            self._loop,
-        )
+        if self._loop and self._env_manager:
+            asyncio.run_coroutine_threadsafe(
+                self._env_manager.destroy_env(env_slug), self._loop
+            )
 
     def pipe(
         self,
@@ -209,135 +138,99 @@ class Pipeline:
         messages: list,
         body: dict,
     ) -> Generator[str, None, None]:
-        user_id = _user_id_from_body(body)
-        chat_id = _chat_id_from_body(body, messages)
-        env_slug = _env_slug_from_body(body)
-        base_branch = _base_branch_from_body(body)
-        session_key = (user_id, chat_id)
+        if self._dispatcher is None:
+            yield _sse({"type": "error", "message": "Pipeline não inicializado."})
+            return
 
-        log.info(
-            "pipe() user=%s chat=%s env=%s msg=%r",
-            user_id,
-            chat_id,
-            env_slug,
-            user_message[:80],
+        conversation_id = str(body.get("conversation_id") or "")
+        env_slug = str(body.get("env_slug") or "default")
+        base_branch = str(body.get("base_branch") or "")
+        cursor = body.get("cursor")
+        try:
+            cursor = int(cursor) if cursor is not None else None
+        except (TypeError, ValueError):
+            cursor = None
+
+        task_id: Optional[str] = self._run(
+            self._dispatcher.get_active_task_id(conversation_id or "__none__"), timeout=10
         )
+        runner = self._dispatcher.get_runner(task_id) if task_id else None
 
-        session: Optional[GrpcSession] = self._sessions.get(session_key)
-
-        if session and session.is_alive() and session.pending_action:
-            log.info("Routing reply to pending action: %r", user_message)
-            self._run(session.send_input(user_message), timeout=10)
-
-        elif session and session.is_alive():
-            log.info("Continuing live session in worktree")
-            self._run(session.send_message(user_message), timeout=10)
-
+        if runner and runner.is_alive() and runner.pending_action:
+            self._run(self._dispatcher.send_input(task_id, user_message), timeout=10)
+        elif runner and runner.is_alive():
+            self._run(self._dispatcher.send_message(task_id, user_message), timeout=10)
         else:
-            if session:
-                self._run(session.close(), timeout=5)
-                del self._sessions[session_key]
-
-            try:
-                sandbox = self._run(
-                    self._env_manager.get_or_create_session(
-                        user_id=user_id,
-                        chat_id=chat_id,
-                        env_slug=env_slug,
-                        base_branch=base_branch,
-                    ),
-                    timeout=180,
-                )
-            except TimeoutError as exc:
-                yield _sse({"type": "error", "message": f"Timeout ao iniciar o agente. {exc}"})
-                return
-            except Exception as exc:
-                log.exception("Falha ao criar sessão")
-                yield _sse({"type": "error", "message": f"Erro ao iniciar o agente: {exc}"})
-                return
-
-            working_directory = sandbox.worktree_path or f"/repos/{env_slug}"
-
-            session = GrpcSession(
-                container_ip=sandbox.container_ip,
-                grpc_port=sandbox.grpc_port,
-                session_id=f"{user_id}:{chat_id}",
-                model=self.valves.OPENROUTER_MODEL,
-                working_directory=working_directory,
+            task_id = self._run(
+                self._dispatcher.dispatch(
+                    prompt=user_message,
+                    env_slug=env_slug,
+                    conversation_id=conversation_id or None,
+                    triggered_by="user",
+                    base_branch=base_branch,
+                ),
+                timeout=10,
             )
+
+        yield from self._stream_events(task_id, cursor)
+
+    def _stream_events(self, task_id: str, cursor: Optional[int]) -> Generator[str, None, None]:
+        import queue as _queue
+
+        import asyncpg as _asyncpg
+
+        db_url = self.valves.DATABASE_URL
+        out_q: _queue.Queue = _queue.Queue()
+
+        async def _produce() -> None:
+            pool = await _asyncpg.create_pool(db_url, min_size=1, max_size=2)
             try:
-                self._run(session.start(user_message), timeout=30)
-            except Exception as exc:
-                log.exception("Falha ao iniciar sessão gRPC")
-                yield _sse({"type": "error", "message": f"Erro ao conectar ao agente: {exc}"})
-                return
+                last_id = cursor
+                while True:
+                    if last_id is None:
+                        rows = await pool.fetch(
+                            "SELECT id, event_type, data FROM agent_events "
+                            "WHERE task_id=$1::uuid ORDER BY id LIMIT 50",
+                            task_id,
+                        )
+                    else:
+                        rows = await pool.fetch(
+                            "SELECT id, event_type, data FROM agent_events "
+                            "WHERE task_id=$1::uuid AND id>$2 ORDER BY id LIMIT 50",
+                            task_id, last_id,
+                        )
+                    for row in rows:
+                        last_id = row["id"]
+                        data = row["data"]
+                        if isinstance(data, str):
+                            data = json.loads(data)
+                        out_q.put((row["event_type"], data, last_id))
+                    status_row = await pool.fetchrow(
+                        "SELECT status FROM agent_tasks WHERE id=$1::uuid", task_id
+                    )
+                    if (status_row and status_row["status"] in ("done", "error")) and not rows:
+                        break
+                    if not rows:
+                        await asyncio.sleep(0.5)
+            finally:
+                out_q.put(None)
+                await pool.close()
 
-            self._sessions[session_key] = session
+        asyncio.run_coroutine_threadsafe(_produce(), self._loop)
 
-        out_q: Queue = Queue()
-
-        asyncio.run_coroutine_threadsafe(
-            session.drain_to(out_q), self._loop
-        )
-
-        did_yield = False
         while True:
-            try:
-                event_type, data = out_q.get(timeout=300)
-            except Empty:
-                yield _sse({"type": "error", "message": "Timeout: agente sem resposta por 5 minutos."})
+            item = out_q.get(timeout=310)
+            if item is None:
                 break
-
-            if event_type is _DONE:
-                if isinstance(data, str):
-                    yield _sse({"type": "error", "message": f"Erro do agente: {data}"})
-                    did_yield = True
-                elif not did_yield:
-                    yield _sse({
-                        "type": "error",
-                        "message": (
-                            "O agente não devolveu texto. "
-                            "Confirma OPENROUTER_API_KEY, o modelo e se o sandbox está a correr."
-                        ),
-                    })
-                    did_yield = True
-                if session_key in self._sessions:
-                    del self._sessions[session_key]
-                break
-
-            elif event_type == "text":
-                did_yield = True
-                yield _sse({"type": "text", "content": data})
-
-            elif event_type == "tool_start":
-                yield _sse({"type": "tool_start", **data})
-
-            elif event_type == "tool_result":
-                yield _sse({"type": "tool_result", **data})
-
-            elif event_type == "action":
-                action: PendingAction = data
-                log.info(
-                    "[%s] Auto-approving action: %s",
-                    session_key,
-                    action.question[:80],
-                )
-                self._run(session.send_input("yes"), timeout=10)
-                asyncio.run_coroutine_threadsafe(
-                    session.drain_to(out_q), self._loop
-                )
-
-            elif event_type == "timeout":
-                yield _sse({"type": "error", "message": "Timeout: agente demorou muito para responder."})
-                break
+            event_type, data, eid = item
+            yield _sse({"type": event_type, "cursor": eid, **(data if data else {})})
 
     async def _gc_loop(self) -> None:
         while True:
             try:
                 await asyncio.sleep(300)
-                dead = [k for k, s in self._sessions.items() if not s.is_alive()]
-                for k in dead:
-                    await self._sessions.pop(k).close()
+                if self._dispatcher:
+                    await self._dispatcher.gc()
                 if self._env_manager:
                     await self._env_manager.gc_expired()
                     await self._env_manager.gc_idle_envs(self.valves.ENV_IDLE_TIMEOUT)
@@ -345,4 +238,3 @@ class Pipeline:
                 break
             except Exception:
                 log.exception("GC loop error")
-

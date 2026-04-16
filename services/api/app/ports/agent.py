@@ -35,6 +35,30 @@ class AgentPort(ABC):
         """
 
     @abstractmethod
+    async def dispatch(
+        self,
+        prompt: str,
+        env_slug: str,
+        conversation_id: str | None = None,
+        triggered_by: str = "system",
+        trigger_payload: dict | None = None,
+        base_branch: str = "",
+    ) -> str | None:
+        """Dispatch an agent task and return the task_id.
+
+        Unlike pipe(), this is fire-and-forget: it creates the task in the DB
+        and starts execution in the background. Returns task_id or None.
+
+        Args:
+            prompt: The instruction/question for the agent.
+            env_slug: Target environment slug.
+            conversation_id: Optional conversation to associate the task with.
+            triggered_by: Source of the trigger (user/github/gitlab/routine/schedule).
+            trigger_payload: Additional metadata about the trigger.
+            base_branch: Git base branch override (empty = use repo default).
+        """
+
+    @abstractmethod
     async def on_startup(self) -> None:
         """Initialise resources (connections, background tasks)."""
 
