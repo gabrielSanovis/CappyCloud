@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Annotated, Optional
+from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -19,8 +19,8 @@ router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 
 class CreatePrBody(BaseModel):
-    title: Optional[str] = None
-    body: Optional[str] = None
+    title: str | None = None
+    body: str | None = None
     draft: bool = False
 
 
@@ -169,7 +169,9 @@ async def create_pr_subscription(
     )
     conv = row.fetchone()
     if not conv:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversa não encontrada.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Conversa não encontrada"
+        )
     if not conv.github_pr_number:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -179,7 +181,8 @@ async def create_pr_subscription(
     sub_id = str(uuid.uuid4())
     await db.execute(
         text(
-            "INSERT INTO pr_subscriptions (id, conversation_id, repo_slug, pr_number, auto_fix_enabled) "
+            "INSERT INTO pr_subscriptions "
+            "(id, conversation_id, repo_slug, pr_number, auto_fix_enabled) "
             "VALUES (:id, :cid, :slug, :num, TRUE)"
         ),
         {

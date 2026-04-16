@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import json
-import uuid as _uuid
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -21,15 +20,15 @@ class TaskTriggerBody(BaseModel):
     env_slug: str = Field(min_length=1, max_length=128)
     prompt: str = Field(min_length=1)
     triggered_by: str = Field(default="manual")
-    conversation_id: Optional[str] = None
+    conversation_id: str | None = None
 
 
 @router.get("")
 async def list_tasks(
     current: Annotated[User, Depends(get_authenticated_user)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
-    env_slug: Optional[str] = Query(default=None),
-    task_status: Optional[str] = Query(default=None, alias="status"),
+    env_slug: str | None = Query(default=None),
+    task_status: str | None = Query(default=None, alias="status"),
     limit: int = Query(default=50, le=200),
 ) -> list[dict]:
     """Lista tasks acessíveis pelo utilizador autenticado."""
@@ -102,7 +101,9 @@ async def get_task_events(
     task_id: str,
     current: Annotated[User, Depends(get_authenticated_user)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
-    after: Optional[int] = Query(default=None, description="Cursor: retorna eventos com id > after"),
+    after: int | None = Query(
+        default=None, description="Cursor: retorna eventos com id > after"
+    ),
     limit: int = Query(default=100, le=500),
 ) -> list[dict]:
     """Eventos de uma task (paginados por cursor)."""

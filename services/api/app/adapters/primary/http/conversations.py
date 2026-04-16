@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -91,7 +91,7 @@ async def stream_message(
     body: SendMessageBody,
     current: Annotated[User, Depends(get_authenticated_user)],
     uc: Annotated[StreamMessage, Depends(get_stream_msg_uc)],
-    cursor: Optional[int] = Query(
+    cursor: int | None = Query(
         default=None,
         description="Último agent_event.id recebido (para reconexão)",
     ),

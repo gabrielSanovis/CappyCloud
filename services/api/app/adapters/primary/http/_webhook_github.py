@@ -8,6 +8,8 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
+from sqlalchemy import text
+
 if TYPE_CHECKING:
     from fastapi import Request
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -91,8 +93,8 @@ def extract_pr_number(event_type: str, payload: dict) -> int | None:
 
 
 async def handle_github_event(
-    request: "Request",
-    db: "AsyncSession",
+    request: Request,
+    db: AsyncSession,
     event_type: str,
     repo_slug: str,
     clone_url: str,
@@ -101,13 +103,11 @@ async def handle_github_event(
 ) -> dict:
     """Processa o evento GitHub: gera prompt, encontra env_slug e faz dispatch."""
     from app.adapters.primary.http.webhooks import dispatch_task, find_env_slug
-    from sqlalchemy import text
 
     prompt = build_github_prompt(event_type, payload)
     if not prompt:
         return {"status": "ignored", "event": event_type}
 
-    # Auto-fix routing via pr_subscriptions
     conversation_id: str | None = None
     pr_number = extract_pr_number(event_type, payload)
     if pr_number and repo_slug:
@@ -128,7 +128,6 @@ async def handle_github_event(
         log.warning("GitHub webhook: repo '%s' não mapeado.", clone_url)
         return {"status": "no_env", "event": event_type, "repo": clone_url}
 
-    # Fire matching routines with GitHub triggers
     await _fire_github_routines(request, db, event_type, repo_slug)
 
     task_id = await dispatch_task(
@@ -145,16 +144,12 @@ async def handle_github_event(
 
 
 async def _fire_github_routines(
-    request: "Request",
-    db: "AsyncSession",
+    request: Request,
+    db: AsyncSession,
     event_type: str,
     repo_slug: str,
 ) -> None:
     """Dispara routines com trigger do tipo 'github' que casam com o evento."""
-    import json
-
-    from sqlalchemy import text
-
     try:
         rows = await db.execute(
             text(

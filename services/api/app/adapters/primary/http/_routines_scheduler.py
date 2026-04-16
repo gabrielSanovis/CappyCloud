@@ -36,7 +36,7 @@ def register_routine_schedules(request: Request, routine_id: str, body: RoutineI
                 rid: str = routine_id,
                 prompt: str = body.prompt,
                 env_slug: str = body.env_slug,
-                _request: "Request" = request,
+                _request: Request = request,
             ) -> None:
                 from sqlalchemy import text
 

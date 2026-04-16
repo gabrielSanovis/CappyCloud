@@ -7,7 +7,7 @@ Routers and use cases depend only on AgentPort; they never import Pipeline direc
 from __future__ import annotations
 
 from collections.abc import Generator
-from typing import Optional, cast
+from typing import cast
 
 from app.ports.agent import AgentPort
 
@@ -38,11 +38,11 @@ class PipelineAdapter(AgentPort):
         self,
         prompt: str,
         env_slug: str,
-        conversation_id: Optional[str] = None,
+        conversation_id: str | None = None,
         triggered_by: str = "system",
-        trigger_payload: Optional[dict] = None,
+        trigger_payload: dict | None = None,
         base_branch: str = "",
-    ) -> Optional[str]:
+    ) -> str | None:
         """Dispatch a task via the TaskDispatcher and return task_id."""
         dispatcher = self._pipeline._dispatcher
         if dispatcher is None:

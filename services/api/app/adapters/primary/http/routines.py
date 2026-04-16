@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid as _uuid
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -45,7 +45,7 @@ class RoutineOut(BaseModel):
     triggers: list[dict]
     enabled: bool
     created_at: str
-    last_run_at: Optional[str]
+    last_run_at: str | None
 
 
 def _row_to_out(r) -> RoutineOut:
@@ -261,7 +261,7 @@ async def _fire_routine(
     if not r.enabled:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Routine desativada.")
 
-    task_id: Optional[str] = None
+    task_id: str | None = None
     try:
         agent = request.app.state.agent
         task_id = await agent.dispatch(

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import logging
 import os
@@ -14,7 +12,6 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapters.primary.http.deps import get_db_session
 from app.adapters.primary.http._webhook_github import (
     handle_github_event,
     verify_github_signature,
@@ -22,6 +19,7 @@ from app.adapters.primary.http._webhook_github import (
 from app.adapters.primary.http._webhook_gitlab import (
     build_gitlab_prompt,
 )
+from app.adapters.primary.http.deps import get_db_session
 
 log = logging.getLogger(__name__)
 
@@ -126,8 +124,10 @@ async def github_webhook(
 
     try:
         payload = json.loads(body)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payload inválido.")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Payload inválido."
+        ) from exc
 
     event_type = x_github_event or "unknown"
     repo = payload.get("repository") or {}
@@ -160,8 +160,10 @@ async def gitlab_webhook(
     body = await request.body()
     try:
         payload = json.loads(body)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payload inválido.")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Payload inválido."
+        ) from exc
 
     event_type = x_gitlab_event or payload.get("object_kind", "unknown")
     project = payload.get("project") or payload.get("repository") or {}
