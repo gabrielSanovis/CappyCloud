@@ -1,15 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  Badge,
   Burger,
   Button,
-  Group,
   ScrollArea,
   Stack,
   Text,
-  Textarea,
-  UnstyledButton,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import {
