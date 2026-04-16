@@ -128,8 +128,7 @@ def _get_current_branch(container_id: str, worktree_path: str) -> str:
         client = docker.from_env()
         container = client.containers.get(container_id)
         container.exec_run(
-            ["git", "-C", worktree_path, "push", "--set-upstream", "origin",
-             "HEAD", "--quiet"]
+            ["git", "-C", worktree_path, "push", "--set-upstream", "origin", "HEAD", "--quiet"]
         )
         exit_code, output = container.exec_run(
             ["git", "-C", worktree_path, "rev-parse", "--abbrev-ref", "HEAD"]
@@ -169,9 +168,7 @@ async def create_pr_subscription(
     )
     conv = row.fetchone()
     if not conv:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Conversa não encontrada"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversa não encontrada")
     if not conv.github_pr_number:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

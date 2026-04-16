@@ -170,9 +170,7 @@ class StreamMessage:
             injected_prompt, model_id, messages_payload, pipeline_body, conversation_id
         )
 
-    async def _inject_diff_comments(
-        self, conversation_id: uuid.UUID, content: str
-    ) -> str:
+    async def _inject_diff_comments(self, conversation_id: uuid.UUID, content: str) -> str:
         """Fetch unbundled diff_comments and prepend them to the prompt.
 
         After fetching, marks them as bundled so they are not injected again.
@@ -203,9 +201,7 @@ class StreamMessage:
                 ids = [str(row.id) for row in comments]
                 id_list = ", ".join(f"'{i}'" for i in ids)
                 await session.execute(
-                    text(
-                        f"UPDATE diff_comments SET bundled_at = NOW() WHERE id IN ({id_list})"
-                    )
+                    text(f"UPDATE diff_comments SET bundled_at = NOW() WHERE id IN ({id_list})")
                 )
                 await session.commit()
 
@@ -263,4 +259,3 @@ class StreamMessage:
                     content=error_content,
                 )
             )
-

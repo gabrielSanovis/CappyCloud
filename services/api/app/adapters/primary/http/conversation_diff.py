@@ -227,8 +227,13 @@ async def add_diff_comment(
             "INSERT INTO diff_comments (id, conversation_id, file_path, line, content) "
             "VALUES (:id, :cid, :fp, :ln, :content)"
         ),
-        {"id": comment_id, "cid": str(conversation_id), "fp": body.file_path,
-         "ln": body.line, "content": body.content},
+        {
+            "id": comment_id,
+            "cid": str(conversation_id),
+            "fp": body.file_path,
+            "ln": body.line,
+            "content": body.content,
+        },
     )
     await db.commit()
     return {"id": comment_id, "conversation_id": str(conversation_id), "bundled": False}

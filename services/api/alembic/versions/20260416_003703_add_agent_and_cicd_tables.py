@@ -5,6 +5,7 @@ Revises:
 Create Date: 2026-04-16 00:37:03.224340
 
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -82,8 +83,12 @@ def upgrade() -> None:
     op.execute("CREATE INDEX IF NOT EXISTS ix_repo_environments_slug ON repo_environments(slug)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_users_email ON users(email)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_conversations_user_id ON conversations(user_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_conversations_environment_id ON conversations(environment_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_messages_conversation_id ON messages(conversation_id)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_conversations_environment_id ON conversations(environment_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_messages_conversation_id ON messages(conversation_id)"
+    )
 
     # ------------------------------------------------------------------ #
     # agent_tasks
@@ -104,7 +109,9 @@ def upgrade() -> None:
             created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW()
         )
     """)
-    op.execute("CREATE INDEX IF NOT EXISTS ix_agent_tasks_conversation_id ON agent_tasks(conversation_id)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_agent_tasks_conversation_id ON agent_tasks(conversation_id)"
+    )
     op.execute("CREATE INDEX IF NOT EXISTS ix_agent_tasks_env_slug ON agent_tasks(env_slug)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_agent_tasks_status ON agent_tasks(status)")
 
@@ -152,7 +159,9 @@ def upgrade() -> None:
             created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
     """)
-    op.execute("CREATE INDEX IF NOT EXISTS ix_diff_comments_conversation_id ON diff_comments(conversation_id)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_diff_comments_conversation_id ON diff_comments(conversation_id)"
+    )
 
     # ------------------------------------------------------------------ #
     # routines
@@ -201,8 +210,12 @@ def upgrade() -> None:
             created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
     """)
-    op.execute("CREATE INDEX IF NOT EXISTS ix_pr_subscriptions_conversation_id ON pr_subscriptions(conversation_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_pr_subscriptions_repo_pr ON pr_subscriptions(repo_slug, pr_number)")
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_pr_subscriptions_conversation_id ON pr_subscriptions(conversation_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_pr_subscriptions_repo_pr ON pr_subscriptions(repo_slug, pr_number)"
+    )
 
 
 def downgrade() -> None:
@@ -223,4 +236,3 @@ def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS conversations CASCADE")
     op.execute("DROP TABLE IF EXISTS users CASCADE")
     op.execute("DROP TABLE IF EXISTS repo_environments CASCADE")
-

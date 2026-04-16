@@ -188,12 +188,8 @@ class AgentTask(Base):
     )
     env_slug: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     session_id: Mapped[str] = mapped_column(String(256), nullable=False, default="")
-    status: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="pending", index=True
-    )
-    triggered_by: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="user"
-    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
+    triggered_by: Mapped[str] = mapped_column(String(32), nullable=False, default="user")
     trigger_payload: Mapped[dict] = mapped_column(JSONBType, nullable=False, default=dict)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -201,9 +197,7 @@ class AgentTask(Base):
     last_event_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     conversation: Mapped[Conversation | None] = relationship(
         "Conversation", back_populates="agent_tasks"
@@ -230,9 +224,7 @@ class AgentEvent(Base):
     )
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     data: Mapped[dict] = mapped_column(JSONBType, nullable=False, default=dict)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     task: Mapped[AgentTask] = relationship("AgentTask", back_populates="events")
 
@@ -253,9 +245,7 @@ class CicdEvent(Base):
         nullable=True,
     )
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class DiffComment(Base):
@@ -278,9 +268,7 @@ class DiffComment(Base):
     line: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     bundled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     conversation: Mapped[Conversation] = relationship(
         "Conversation", back_populates="diff_comments"
@@ -322,9 +310,7 @@ class Routine(Base):
         index=True,
     )
     api_token_hash: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     environment: Mapped[RepoEnvironment] = relationship(
@@ -355,9 +341,7 @@ class RoutineRun(Base):
     )
     triggered_by: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
-    started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     routine: Mapped[Routine] = relationship("Routine", back_populates="runs")
 
@@ -388,11 +372,8 @@ class PrSubscription(Base):
     repo_slug: Mapped[str] = mapped_column(String(512), nullable=False)
     pr_number: Mapped[int] = mapped_column(Integer, nullable=False)
     auto_fix_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     conversation: Mapped[Conversation] = relationship(
         "Conversation", back_populates="pr_subscriptions"
     )
-

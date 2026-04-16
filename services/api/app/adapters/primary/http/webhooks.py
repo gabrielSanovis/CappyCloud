@@ -86,9 +86,7 @@ async def dispatch_task(
         )
         if cicd_event_id and task_id:
             await db.execute(
-                text(
-                    "UPDATE cicd_events SET task_id = :tid, processed_at = NOW() WHERE id = :eid"
-                ),
+                text("UPDATE cicd_events SET task_id = :tid, processed_at = NOW() WHERE id = :eid"),
                 {"tid": task_id, "eid": cicd_event_id},
             )
             await db.commit()
@@ -132,9 +130,7 @@ async def github_webhook(
     event_type = x_github_event or "unknown"
     repo = payload.get("repository") or {}
     repo_slug = repo.get("full_name", "")
-    clone_url = (
-        repo.get("clone_url") or repo.get("git_url") or repo.get("ssh_url") or ""
-    )
+    clone_url = repo.get("clone_url") or repo.get("git_url") or repo.get("ssh_url") or ""
 
     cicd_event_id = await insert_cicd_event(db, "github", event_type, repo_slug, payload)
     return await handle_github_event(
@@ -167,9 +163,7 @@ async def gitlab_webhook(
 
     event_type = x_gitlab_event or payload.get("object_kind", "unknown")
     project = payload.get("project") or payload.get("repository") or {}
-    clone_url = (
-        project.get("http_url") or project.get("url") or project.get("git_http_url") or ""
-    )
+    clone_url = project.get("http_url") or project.get("url") or project.get("git_http_url") or ""
     repo_slug = project.get("path_with_namespace") or project.get("name", "")
 
     cicd_event_id = await insert_cicd_event(db, "gitlab", event_type, repo_slug, payload)

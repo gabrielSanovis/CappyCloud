@@ -32,4 +32,3 @@ async def init_db() -> None:
     # Override URL to pick up the runtime env var (not the placeholder in .ini)
     alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
     await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
-

@@ -32,8 +32,6 @@ def build_gitlab_prompt(event_type: str, payload: dict) -> str | None:
         last = commits[-1] if commits else {}
         message = last.get("message", "")[:200]
         ref = payload.get("ref", "")
-        return (
-            f"Push em {ref}: {message}\n\nVerifique se há problemas no código actualizado."
-        )
+        return f"Push em {ref}: {message}\n\nVerifique se há problemas no código actualizado."
 
     return None

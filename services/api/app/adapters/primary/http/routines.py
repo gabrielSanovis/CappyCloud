@@ -91,9 +91,13 @@ async def create_routine(
             "VALUES (:id, :name, :prompt, :slug, :triggers::jsonb, :enabled, :uid)"
         ),
         {
-            "id": rid, "name": body.name, "prompt": body.prompt,
-            "slug": body.env_slug, "triggers": triggers_json,
-            "enabled": body.enabled, "uid": str(current.id),
+            "id": rid,
+            "name": body.name,
+            "prompt": body.prompt,
+            "slug": body.env_slug,
+            "triggers": triggers_json,
+            "enabled": body.enabled,
+            "uid": str(current.id),
         },
     )
     await db.commit()
@@ -143,9 +147,13 @@ async def update_routine(
             "WHERE id=:id AND created_by=:uid RETURNING id"
         ),
         {
-            "id": routine_id, "uid": str(current.id),
-            "name": body.name, "prompt": body.prompt,
-            "slug": body.env_slug, "triggers": triggers_json, "enabled": body.enabled,
+            "id": routine_id,
+            "uid": str(current.id),
+            "name": body.name,
+            "prompt": body.prompt,
+            "slug": body.env_slug,
+            "triggers": triggers_json,
+            "enabled": body.enabled,
         },
     )
     if not result.fetchone():
@@ -200,8 +208,7 @@ async def fire_routine_api(
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     row = await db.execute(
         text(
-            "SELECT id FROM routines "
-            "WHERE id = :rid AND api_token_hash = :hash AND enabled = TRUE"
+            "SELECT id FROM routines WHERE id = :rid AND api_token_hash = :hash AND enabled = TRUE"
         ),
         {"rid": routine_id, "hash": token_hash},
     )

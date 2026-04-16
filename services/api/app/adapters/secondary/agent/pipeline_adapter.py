@@ -75,4 +75,3 @@ class PipelineAdapter(AgentPort):
     def destroy_env(self, env_slug: str) -> None:
         """Delegate environment destruction to the underlying Pipeline."""
         self._pipeline.destroy_env(env_slug)
-

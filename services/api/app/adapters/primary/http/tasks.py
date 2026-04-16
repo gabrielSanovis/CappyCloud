@@ -101,9 +101,7 @@ async def get_task_events(
     task_id: str,
     current: Annotated[User, Depends(get_authenticated_user)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
-    after: int | None = Query(
-        default=None, description="Cursor: retorna eventos com id > after"
-    ),
+    after: int | None = Query(default=None, description="Cursor: retorna eventos com id > after"),
     limit: int = Query(default=100, le=500),
 ) -> list[dict]:
     """Eventos de uma task (paginados por cursor)."""
