@@ -403,4 +403,3 @@ export async function getEnvironmentStatus(_token: string): Promise<EnvironmentS
 export async function wakeEnvironment(_token: string): Promise<void> {
   // no-op — environments are now per-slug, not per-user
 }
-

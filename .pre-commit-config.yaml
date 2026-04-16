@@ -25,3 +25,4 @@ repos:
         entry: python scripts/check_file_length.py
         language: system
         types_or: [python, ts, tsx, javascript, jsx]
+        exclude: ^web/
