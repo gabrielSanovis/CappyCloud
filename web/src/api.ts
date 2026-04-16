@@ -392,7 +392,7 @@ export async function wakeRepoEnvironment(token: string, envId: string): Promise
  * Returns the current status of the user's sandbox environment.
  * @deprecated Use getRepoEnvironmentStatus with a specific envId instead.
  */
-export async function getEnvironmentStatus(token: string): Promise<EnvironmentStatusResponse> {
+export async function getEnvironmentStatus(_token: string): Promise<EnvironmentStatusResponse> {
   return { status: 'none', container_id: null }
 }
 
@@ -400,7 +400,6 @@ export async function getEnvironmentStatus(token: string): Promise<EnvironmentSt
  * Triggers environment creation or restart in the background (fire-and-forget).
  * @deprecated Use wakeRepoEnvironment with a specific envId instead.
  */
-export async function wakeEnvironment(token: string): Promise<void> {
+export async function wakeEnvironment(_token: string): Promise<void> {
   // no-op — environments are now per-slug, not per-user
 }
-

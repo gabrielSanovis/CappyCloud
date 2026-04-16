@@ -6,9 +6,6 @@ on:
       - "web/**"
       - ".github/workflows/frontend.yml"
   pull_request:
-    paths:
-      - "web/**"
-      - ".github/workflows/frontend.yml"
 
 jobs:
   lint:

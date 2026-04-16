@@ -17,3 +17,12 @@ repos:
       - id: check-merge-conflict
       - id: check-added-large-files
         args: [--maxkb=500]
+
+  - repo: local
+    hooks:
+      - id: max-file-length
+        name: "Máximo 300 linhas por arquivo"
+        entry: python scripts/check_file_length.py
+        language: system
+        types_or: [python, ts, tsx, javascript, jsx]
+        exclude: ^web/

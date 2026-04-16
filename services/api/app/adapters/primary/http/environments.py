@@ -25,7 +25,7 @@ from app.adapters.primary.http.deps import (
     get_list_repo_envs_uc,
     get_repo_env_repo,
 )
-from app.application.use_cases.conversations import (
+from app.application.use_cases.repo_environments import (
     CreateRepoEnvironment,
     DeleteRepoEnvironment,
     ListRepoEnvironments,
