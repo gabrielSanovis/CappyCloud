@@ -7,10 +7,6 @@ on:
       - "services/cappycloud_agent/**"
       - ".github/workflows/ci.yml"
   pull_request:
-    paths:
-      - "services/api/**"
-      - "services/cappycloud_agent/**"
-      - ".github/workflows/ci.yml"
 
 jobs:
   lint-and-test:
