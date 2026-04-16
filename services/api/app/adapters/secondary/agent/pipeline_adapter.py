@@ -79,4 +79,5 @@ class PipelineAdapter(AgentPort):
 
     def cancel_conversation(self, conversation_id: str) -> bool:
         """Delegate conversation cancel to the underlying Pipeline."""
-        return self._pipeline.cancel_conversation(conversation_id)
+        result = self._pipeline.cancel_conversation(conversation_id)
+        return bool(result)
