@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     BigInteger,
@@ -19,6 +20,9 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.orm_models import Base, JSONBType, UUIDType
+
+if TYPE_CHECKING:
+    from app.infrastructure.orm_models import Conversation, RepoEnvironment, User
 
 
 class AgentTask(Base):
