@@ -175,7 +175,7 @@ class GrpcSession:
 
                 if event == "text_chunk":
                     streamed_text = True
-                    await self._out_queue.put(("text", msg.text_chunk.text))
+                    await self._out_queue.put(("text", {"content": msg.text_chunk.text}))
 
                 elif event == "tool_start":
                     ts = msg.tool_start

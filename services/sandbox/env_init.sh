@@ -133,10 +133,33 @@ if [ -f "$_TS" ]; then
 const fs = require('fs');
 const file = process.argv[2];
 let c = fs.readFileSync(file, 'utf8');
-if (c.includes('gpt-oss-120b')) { console.log('[env_init] context window patch: already present.'); process.exit(0); }
+// OpenRouter prefixes models with "openai/", "anthropic/", etc.
+// Add common OpenRouter-namespaced model names that map to known context windows.
 const needle = "  // Groq (fast inference)\n  'llama-3.3-70b-versatile'";
-const insert = "  // OpenRouter free tier\n  'openai/gpt-oss-120b':          128_000,\n  'openai/gpt-oss-120b:free':      128_000,\n\n";
-if (!c.includes(needle)) { console.log('[env_init] context window patch: needle not found, skipping.'); process.exit(0); }
+const insert = [
+  "  // OpenRouter-namespaced models (provider/model format used by OpenRouter API)",
+  "  'openai/gpt-4o':                128_000,",
+  "  'openai/gpt-4o-mini':           128_000,",
+  "  'openai/gpt-4.1':             1_047_576,",
+  "  'openai/gpt-4.1-mini':        1_047_576,",
+  "  'openai/gpt-oss-120b':          128_000,",
+  "  'openai/gpt-oss-120b:free':     128_000,",
+  "  'openai/o1':                    200_000,",
+  "  'openai/o3-mini':               200_000,",
+  "  'anthropic/claude-3-haiku':     200_000,",
+  "  'anthropic/claude-3-sonnet':    200_000,",
+  "  'anthropic/claude-3.5-sonnet':  200_000,",
+  "  'anthropic/claude-3-opus':      200_000,",
+  "",
+].join('\n');
+if (c.includes('openai/gpt-4o-mini')) {
+  console.log('[env_init] context window patch: already present.');
+  process.exit(0);
+}
+if (!c.includes(needle)) {
+  console.log('[env_init] context window patch: needle not found, skipping.');
+  process.exit(0);
+}
 fs.writeFileSync(file, c.replace(needle, insert + needle));
 console.log('[env_init] openclaude context window patch applied.');
 PATCH_EOF
