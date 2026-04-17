@@ -70,6 +70,7 @@ class RepoEnvOut(BaseModel):
 
 # ── Sandboxes ─────────────────────────────────────────────────
 
+
 class SandboxOut(BaseModel):
     """Dados públicos de uma instância sandbox."""
 
@@ -85,6 +86,7 @@ class SandboxOut(BaseModel):
 
 
 # ── Conversations ─────────────────────────────────────────────
+
 
 class RepoSelection(BaseModel):
     """Um repositório selecionado para participar da sessão.
@@ -147,6 +149,7 @@ class ConversationOut(BaseModel):
 
 
 # ── Platform control plane schemas ────────────────────────────
+
 
 class GitProviderCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128)

@@ -20,6 +20,7 @@ router = APIRouter(tags=["ai"])
 
 # ── AI Providers ──────────────────────────────────────────────
 
+
 @router.get("/ai-providers", response_model=list[AiProviderOut])
 async def list_ai_providers(
     _current: Annotated[User, Depends(get_authenticated_user)],
@@ -65,6 +66,7 @@ async def update_ai_provider_key(
 
 
 # ── AI Models ─────────────────────────────────────────────────
+
 
 @router.get("/ai-models", response_model=list[AiModelOut])
 async def list_ai_models(

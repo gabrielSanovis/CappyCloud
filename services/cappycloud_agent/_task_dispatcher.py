@@ -1,19 +1,4 @@
-"""TaskDispatcher — orquestra o ciclo de vida das AgentTasks.
-
-Substitui o `self._sessions: dict[tuple, GrpcSession]` in-memory da Pipeline.
-
-Responsabilidades:
-- Receber pedidos de dispatch via dispatch() e criar registros em agent_tasks
-- Arrancar TaskRunners para tasks pending
-- No startup reconectar tasks running/paused órfãs (recuperação após restart)
-- Expor acesso a runners activos para pipe() fazer SSE
-
-Arquitetura:
-  Pipeline.on_startup()  →  dispatcher.start()
-  API request            →  dispatcher.dispatch(...)   → INSERT agent_tasks → TaskRunner
-  pipe() / SSE           →  dispatcher.get_runner(task_id)
-  GC loop                →  dispatcher.gc()
-"""
+"""TaskDispatcher — orquestra o ciclo de vida das AgentTasks."""
 
 from __future__ import annotations
 
@@ -22,7 +7,6 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
 
 import asyncpg
 
@@ -48,7 +32,7 @@ class TaskDispatcher:
         self._store = session_store
         self._db_url = db_url
         self._model = openrouter_model
-        self._pool: Optional[asyncpg.Pool] = None
+        self._pool: asyncpg.Pool | None = None
 
         # task_id (str) → TaskRunner
         self._runners: dict[str, TaskRunner] = {}
@@ -72,11 +56,11 @@ class TaskDispatcher:
     async def dispatch(
         self,
         prompt: str,
-        conversation_id: Optional[str] = None,
+        conversation_id: str | None = None,
         triggered_by: str = "user",
-        trigger_payload: Optional[dict] = None,
+        trigger_payload: dict | None = None,
         # Multi-repo
-        repos: Optional[list] = None,
+        repos: list | None = None,
         session_root: str = "",
         sandbox_id: str = "",
         # Legacy single-repo
@@ -110,17 +94,17 @@ class TaskDispatcher:
 
     # ── Access to active runners ──────────────────────────────────
 
-    def get_runner(self, task_id: str) -> Optional[TaskRunner]:
+    def get_runner(self, task_id: str) -> TaskRunner | None:
         return self._runners.get(task_id)
 
-    def get_runner_for_conversation(self, conversation_id: str) -> Optional[TaskRunner]:
+    def get_runner_for_conversation(self, conversation_id: str) -> TaskRunner | None:
         """Retorna o runner activo da conversa (status running ou paused)."""
         for task_id, runner in self._runners.items():
             if runner.is_alive():
                 return runner
         return None
 
-    async def get_active_task_id(self, conversation_id: str) -> Optional[str]:
+    async def get_active_task_id(self, conversation_id: str) -> str | None:
         """Retorna o task_id da task running/paused para uma conversa."""
         if not self._pool:
             return None
@@ -186,7 +170,7 @@ class TaskDispatcher:
         self,
         task_id: str,
         prompt: str,
-        conversation_id: Optional[str],
+        conversation_id: str | None,
         repos: list | None = None,
         session_root: str = "",
         sandbox_id: str = "",
@@ -271,7 +255,7 @@ class TaskDispatcher:
     async def _insert_task(
         self,
         task_id: str,
-        conversation_id: Optional[str],
+        conversation_id: str | None,
         prompt: str,
         triggered_by: str,
         trigger_payload: dict,

@@ -58,19 +58,21 @@ class CreateConversation:
 
         # Build repos list with computed branch_name and worktree_path
         resolved_repos: list[dict] = []
-        for r in (repos or []):
+        for r in repos or []:
             slug = r["slug"]
             alias = r.get("alias") or slug
             base = r.get("base_branch") or "main"
             branch_name = f"cappy/{slug}/{short_id}-{alias}"
             worktree_path = f"/repos/sessions/{short_id}/{alias}"
-            resolved_repos.append({
-                "slug": slug,
-                "alias": alias,
-                "base_branch": base,
-                "branch_name": branch_name,
-                "worktree_path": worktree_path,
-            })
+            resolved_repos.append(
+                {
+                    "slug": slug,
+                    "alias": alias,
+                    "base_branch": base,
+                    "branch_name": branch_name,
+                    "worktree_path": worktree_path,
+                }
+            )
 
         session_root = f"/repos/sessions/{short_id}" if resolved_repos else None
 

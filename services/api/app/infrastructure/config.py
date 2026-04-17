@@ -22,8 +22,8 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:5173,http://localhost:38081"
 
-    # Chave Fernet para tokens no banco (32-byte hex ou base64 44-chars).
-    # Gerar: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Chave Fernet para tokens no banco (32-byte hex ou Fernet base64).
+    # Gerar: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key())"
     encryption_key: str = "0" * 64  # sobrescrever em produção via ENCRYPTION_KEY
 
     # Webhook secrets (ainda usados para validar assinaturas)

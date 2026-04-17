@@ -47,7 +47,7 @@ async def sqlite_engine():  # type: ignore[no-untyped-def]
 
 
 @pytest.fixture
-async def db_session(sqlite_engine: Any) -> AsyncGenerator[AsyncSession, None]:
+async def db_session(sqlite_engine: Any) -> AsyncGenerator[AsyncSession]:
     factory = async_sessionmaker(sqlite_engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as session:
         yield session

@@ -36,10 +36,9 @@ async def update_sandbox_status(
     """Atualiza status de um sandbox (active | draining | offline)."""
     if status not in ("active", "draining", "offline"):
         from fastapi import HTTPException
+
         raise HTTPException(status_code=400, detail="status deve ser active, draining ou offline")
-    await session.execute(
-        update(Sandbox).where(Sandbox.id == sandbox_id).values(status=status)
-    )
+    await session.execute(update(Sandbox).where(Sandbox.id == sandbox_id).values(status=status))
     await session.commit()
     row = await session.get(Sandbox, sandbox_id)
     return SandboxOut.model_validate(row)

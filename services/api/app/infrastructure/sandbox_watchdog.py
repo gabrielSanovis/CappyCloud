@@ -70,7 +70,9 @@ class SandboxWatchdog:
                 item.retries += 1
                 item.last_error = str(exc)
                 item.status = "error" if item.retries >= _MAX_RETRIES else "pending"
-                log.warning("[watchdog] %s failed (retry %d): %s", item.operation, item.retries, exc)
+                log.warning(
+                    "[watchdog] %s failed (retry %d): %s", item.operation, item.retries, exc
+                )
 
         await session.commit()
 

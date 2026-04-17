@@ -21,6 +21,7 @@ class User:
 
 # ── Platform control plane ────────────────────────────────────
 
+
 @dataclass
 class Sandbox:
     """Container sandbox hospedando openclaude gRPC + session_server HTTP."""
@@ -126,6 +127,7 @@ class SandboxSyncItem:
 
 # ── Conversations ─────────────────────────────────────────────
 
+
 @dataclass
 class RepoEnvironment:
     id: uuid.UUID
@@ -159,9 +161,9 @@ class Conversation:
     files_changed: int = 0
     # PR tracking
     pr_url: str | None = None
-    pr_status: str = "none"   # none | open | draft | merged | closed
+    pr_status: str = "none"  # none | open | draft | merged | closed
     pr_approved: bool = False
-    pr_number: int | None = None       # legacy
+    pr_number: int | None = None  # legacy
     github_repo_slug: str | None = None  # legacy
     # CI tracking
     ci_status: str = "unknown"  # unknown | pending | running | passed | failed
