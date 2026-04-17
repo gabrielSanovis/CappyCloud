@@ -76,6 +76,9 @@ class TaskDispatcher:
         triggered_by: str = "user",
         trigger_payload: Optional[dict] = None,
         base_branch: str = "",
+        repo_slug: str = "default",
+        worktree_branch: str = "",
+        worktree_path: str = "",
     ) -> str:
         """Cria um agent_task no DB e arranca o TaskRunner correspondente.
 
@@ -90,7 +93,10 @@ class TaskDispatcher:
             trigger_payload=trigger_payload or {},
         )
         asyncio.create_task(
-            self._launch_runner(task_id, prompt, conversation_id, base_branch),
+            self._launch_runner(
+                task_id, prompt, conversation_id,
+                base_branch, repo_slug, worktree_branch, worktree_path,
+            ),
             name=f"dispatch-{task_id[:8]}",
         )
         return task_id
@@ -175,6 +181,9 @@ class TaskDispatcher:
         prompt: str,
         conversation_id: Optional[str],
         base_branch: str,
+        repo_slug: str = "default",
+        worktree_branch: str = "",
+        worktree_path: str = "",
     ) -> None:
         """Cria o worktree, inicia a GrpcSession e arranca o TaskRunner."""
         user_id = conversation_id or "system"
@@ -185,6 +194,9 @@ class TaskDispatcher:
                 user_id=user_id,
                 chat_id=chat_id,
                 base_branch=base_branch,
+                repo_slug=repo_slug,
+                worktree_branch=worktree_branch,
+                worktree_path=worktree_path,
             )
         except Exception as exc:
             log.exception("[Dispatcher] Falha ao criar sessão para task %s", task_id[:8])

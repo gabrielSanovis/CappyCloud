@@ -1,12 +1,11 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { getToken } from './api'
 import { ChatPage } from './pages/ChatPage'
-import { EnvironmentsPage } from './pages/EnvironmentsPage'
 import { LoginPage } from './pages/LoginPage'
 import { RegisterPage } from './pages/RegisterPage'
 
 /**
- * Rotas: login, registo, chat autenticado e gestão de ambientes.
+ * Rotas: login, registo e chat autenticado.
  */
 export default function App() {
   const token = getToken()
@@ -39,16 +38,7 @@ export default function App() {
           )
         }
       />
-      <Route
-        path="/environments"
-        element={
-          token ? (
-            <EnvironmentsPage token={token} />
-          ) : (
-            <Navigate to="/login" replace />
-          )
-        }
-      />
+      <Route path="/environments" element={<Navigate to="/" replace />} />
     </Routes>
   )
 }

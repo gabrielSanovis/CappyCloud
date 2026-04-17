@@ -1,17 +1,4 @@
-"""
-Persistent, resumable gRPC session for a single (user_id, chat_id).
-
-Runs the openclaude bidirectional gRPC stream as a long-lived asyncio Task.
-The session is PAUSED when an ActionRequired event arrives, and RESUMED
-when the user provides their answer via the next pipe() call.
-
-Lifecycle:
-  1. GrpcSession.start(message)     → seeds the request queue, starts the Task
-  2. GrpcSession.drain_to(q)        → called by pipe() to stream output into a Queue
-  3. ActionRequired arrives          → drain_to() stops; session stays alive, paused
-  4. GrpcSession.send_input(reply)  → user answered; resumes the Task
-  5. GrpcSession.send_message(msg)  → new conversation turn (no pending action)
-  6. done / error event             → Task ends; session marked dead
+"""Persistent, resumable gRPC session for a single (user_id, chat_id).
 
 Generated stubs (openclaude_pb2) must be on PYTHONPATH (e.g. /app in Docker).
 """
@@ -20,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
 from queue import Queue
 from typing import Optional
 
@@ -28,38 +14,11 @@ import grpc.aio
 import openclaude_pb2  # type: ignore[import-not-found]
 import openclaude_pb2_grpc  # type: ignore[import-not-found]
 
+from ._grpc_helpers import PendingAction, connect_with_retry, parse_choices
+
 log = logging.getLogger(__name__)
 
-# Sentinel placed in the output queue to signal end-of-stream
 _DONE = object()
-
-
-@dataclass
-class PendingAction:
-    """An ActionRequired event that needs a user response before the stream continues."""
-
-    prompt_id: str
-    question: str
-    action_type: int  # 0 = CONFIRM_COMMAND (yes/no), 1 = REQUEST_INFORMATION (free text)
-    choices: list[str] | None = None  # Parsed options when question contains [A / B / C]
-
-    @property
-    def is_confirmation(self) -> bool:
-        return self.action_type == 0
-
-
-def _parse_choices(question: str) -> list[str] | None:
-    """
-    Extract bracket-formatted choices from a question string.
-
-    Example: "Qual módulo? [PDV / Financeiro / Relatórios]" → ["PDV", "Financeiro", "Relatórios"]
-    """
-    import re
-    m = re.search(r"\[([^\]]+)\]", question)
-    if not m:
-        return None
-    parts = [c.strip() for c in re.split(r"/|,|\|", m.group(1)) if c.strip()]
-    return parts if len(parts) > 1 else None
 
 
 class GrpcSession:
@@ -92,7 +51,7 @@ class GrpcSession:
 
     async def start(self, message: str) -> None:
         """Open the gRPC channel, seed the first ChatRequest, launch the Task."""
-        self._channel = grpc.aio.insecure_channel(f"{self._ip}:{self._port}")
+        self._channel = await connect_with_retry(self._ip, self._port, self._session_id)
         stub = openclaude_pb2_grpc.AgentServiceStub(self._channel)
 
         await self._req_queue.put(
@@ -216,7 +175,7 @@ class GrpcSession:
 
                 if event == "text_chunk":
                     streamed_text = True
-                    await self._out_queue.put(("text", msg.text_chunk.text))
+                    await self._out_queue.put(("text", {"content": msg.text_chunk.text}))
 
                 elif event == "tool_start":
                     ts = msg.tool_start
@@ -242,20 +201,15 @@ class GrpcSession:
                         prompt_id=ar.prompt_id,
                         question=ar.question,
                         action_type=ar.type,
-                        choices=_parse_choices(ar.question),
+                        choices=parse_choices(ar.question),
                     )
                     self.pending_action = action
                     await self._out_queue.put(("action_required", action))
 
                 elif event == "done":
-                    # Alguns builds do openclaude só preenchem `full_text` no evento final,
-                    # sem enviar `text_chunk` — antes ignorávamos isso e o chat ficava vazio.
                     done = msg.done
-                    full = (done.full_text or "").strip()
-                    if full and not streamed_text:
-                        await self._out_queue.put(("text", full))
-                        streamed_text = True
-                    # 0 tokens + no text = LLM API call never happened (rate limit / quota)
+                    # full_text foi removido do proto (reserved 1) — o texto já foi acumulado
+                    # via text_chunk events. Se nenhum chunk chegou mas tokens = 0, é rate limit.
                     if not streamed_text and done.prompt_tokens == 0 and done.completion_tokens == 0:
                         log.warning(
                             "[%s] Done with 0 tokens and no text — LLM call likely failed (rate limit or quota)",
@@ -263,8 +217,10 @@ class GrpcSession:
                         )
                         await self._out_queue.put((
                             "error",
-                            "O modelo não gerou resposta (possível rate limit do OpenRouter). "
-                            "Aguarda alguns segundos e tenta novamente, ou altera o modelo em OPENROUTER_MODEL.",
+                            "O modelo não respondeu (rate limit ou cota esgotada). "
+                            "Aguarde alguns segundos e tente novamente. "
+                            "Para evitar este problema, use um modelo com limite maior em OPENROUTER_MODEL "
+                            "(ex.: openai/gpt-4o-mini ou anthropic/claude-3-haiku).",
                         ))
                         received_done = True
                         return
@@ -295,8 +251,15 @@ class GrpcSession:
                 await self._out_queue.put(("error", "O agente encerrou a conexão inesperadamente (possível rate limit ou timeout do modelo)."))
 
         except grpc.aio.AioRpcError as exc:
-            log.error("[%s] gRPC error: %s", self._session_id, exc.details())
-            await self._out_queue.put(("error", exc.details()))
+            details = exc.details() or str(exc)
+            log.error("[%s] gRPC error: %s", self._session_id, details)
+            if "Socket closed" in details or "UNAVAILABLE" in exc.code().name:
+                await self._out_queue.put((
+                    "error",
+                    "Conexão com o sandbox perdida. Envie sua mensagem novamente para reconectar.",
+                ))
+            else:
+                await self._out_queue.put(("error", details))
         except asyncio.CancelledError:
             log.info("[%s] Session cancelled", self._session_id)
         except Exception as exc:

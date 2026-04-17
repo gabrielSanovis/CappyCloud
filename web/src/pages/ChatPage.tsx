@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
 import {
   Burger,
   ScrollArea,
@@ -10,13 +9,15 @@ import { useDisclosure } from '@mantine/hooks'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
+  AuthError,
   cancelConversation,
   createConversation,
   createConversationPr,
+  fetchBranches,
   fetchConversationDiff,
   fetchConversations,
   fetchMessages,
-  fetchRepoEnvironments,
+  fetchWorkspaces,
   getToken,
   setToken,
   streamAssistantReply,
@@ -24,7 +25,7 @@ import {
   type ChatMessage,
   type Conversation,
   type ConversationDiff,
-  type RepoEnv,
+  type Workspace,
 } from '../api'
 import { ActionRequiredCard } from '../components/ActionRequiredCard'
 import { DiffViewer } from '../components/DiffViewer'
@@ -67,8 +68,8 @@ export function ChatPage() {
   const [streaming, setStreaming] = useState(false)
   const [loading, setLoading] = useState(true)
 
-  const [envs, setEnvs] = useState<RepoEnv[]>([])
-  const [selectedEnvId, setSelectedEnvId] = useState<string | null>(null)
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
+  const [selectedSlug, setSelectedSlug] = useState<string>('')
   const [selectedBranch, setSelectedBranch] = useState<string>('')
 
   const [pendingText, setPendingText] = useState('')
@@ -98,14 +99,21 @@ export function ChatPage() {
     let cancelled = false
     ;(async () => {
       try {
-        const [list, envList] = await Promise.all([
+        const [list, wsList] = await Promise.all([
           fetchConversations(token),
-          fetchRepoEnvironments(token),
+          fetchWorkspaces(token),
         ])
         if (cancelled) return
         setConversations(list)
-        setEnvs(envList)
+        setWorkspaces(wsList)
+        if (wsList.length > 0) setSelectedSlug(wsList[0].slug)
         if (list.length > 0) setActiveId((prev) => prev ?? list[0].id)
+      } catch (e) {
+        if (e instanceof AuthError) {
+          setToken(null)
+          window.location.href = '/login'
+          return
+        }
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -167,7 +175,7 @@ export function ChatPage() {
   }
 
   async function handleNewChat() {
-    const c = await createConversation(token, selectedEnvId, selectedBranch || null)
+    const c = await createConversation(token, null, selectedBranch || null, selectedSlug || null)
     setConversations((prev) => [c, ...prev])
     setActiveId(c.id)
     setMessages([])
@@ -177,7 +185,7 @@ export function ChatPage() {
   /** Cria conversa e envia a mensagem inicial de uma vez */
   async function handleNewChatWithMessage(text: string) {
     if (!text.trim()) return
-    const c = await createConversation(token, selectedEnvId, selectedBranch || null)
+    const c = await createConversation(token, null, selectedBranch || null, selectedSlug || null)
     setConversations((prev) => [c, ...prev])
     setActiveId(c.id)
     setMessages([])
@@ -236,7 +244,9 @@ export function ChatPage() {
       const msgs = await fetchMessages(token, c.id)
       setMessages(msgs)
     } catch (e) {
-      if (e instanceof Error && e.name === 'AbortError') {
+      if (e instanceof AuthError) {
+        setToken(null); window.location.href = '/login'; return
+      } else if (e instanceof Error && e.name === 'AbortError') {
         // Cancelled by user — silently finalize
       } else {
         setMessages((m) => [
@@ -314,7 +324,9 @@ export function ChatPage() {
       const msgs = await fetchMessages(token, activeId)
       setMessages(msgs)
     } catch (e) {
-      if (e instanceof Error && e.name === 'AbortError') {
+      if (e instanceof AuthError) {
+        setToken(null); window.location.href = '/login'; return
+      } else if (e instanceof Error && e.name === 'AbortError') {
         // Cancelled by user — silently finalize
       } else {
         setMessages((m) => [
@@ -345,13 +357,6 @@ export function ChatPage() {
   const activeEnvSlug = activeConv?.env_slug ?? null
   const showThinking =
     streaming && !pendingText && pendingTools.every((t) => t.done) && !pendingAction
-
-  const selectedEnv = envs.find((e) => e.id === selectedEnvId)
-
-  // Quando o ambiente selecionado muda, resetar selectedBranch para o branch padrão do env
-  useEffect(() => {
-    setSelectedBranch(selectedEnv?.branch ?? '')
-  }, [selectedEnvId, selectedEnv?.branch])
 
   const groups = groupConversations(conversations)
 
@@ -426,10 +431,6 @@ export function ChatPage() {
 
           {/* Sidebar bottom nav */}
           <div className={styles.sidebarNav}>
-            <Link to="/environments" className={styles.sidebarNavItem}>
-              <span className={styles.icon}>inventory_2</span>
-              <span>Ambientes</span>
-            </Link>
             <button className={styles.sidebarNavItem} onClick={logout} title="Sair">
               <span className={styles.icon}>logout</span>
               <span>Sair</span>
@@ -445,11 +446,13 @@ export function ChatPage() {
             setInput={setInput}
             inputRef={inputRef}
             onExecute={(text) => handleNewChatWithMessage(text)}
-            envs={envs}
-            selectedEnvId={selectedEnvId}
-            setSelectedEnvId={setSelectedEnvId}
-            selectedBranch={selectedBranch}
             streaming={streaming}
+            workspaces={workspaces}
+            selectedSlug={selectedSlug}
+            setSelectedSlug={setSelectedSlug}
+            selectedBranch={selectedBranch}
+            setSelectedBranch={setSelectedBranch}
+            token={token}
           />
           ) : (
             <ActiveChat
@@ -466,19 +469,15 @@ export function ChatPage() {
               onStop={handleStop}
               onActionReply={handleActionReply}
               activeEnvSlug={activeEnvSlug}
-              activeEnvName={envs.find(e => e.slug === activeEnvSlug)?.name ?? null}
+              activeEnvName={workspaces.find(w => w.slug === activeEnvSlug)?.name ?? activeEnvSlug ?? workspaces[0]?.name ?? null}
               activeBaseBranch={activeConv?.base_branch ?? null}
+              workspaces={workspaces}
               diffStats={diffStats}
               prLoading={prLoading}
               prUrl={prUrl}
               headBranch={headBranch}
               onCreatePr={handleCreatePr}
-              envs={envs}
               activeTitle={activeConv?.title ?? 'Conversa'}
-              selectedEnvId={selectedEnvId}
-              setSelectedEnvId={setSelectedEnvId}
-              selectedBranch={selectedBranch}
-              setSelectedBranch={setSelectedBranch}
               token={token}
               conversationId={activeId!}
               sidePanel={sidePanel}
@@ -500,20 +499,37 @@ export function ChatPage() {
 interface EmptyStateProps {
   input: string
   setInput: (v: string) => void
-  inputRef: React.RefObject<HTMLTextAreaElement>
+  inputRef: React.RefObject<HTMLTextAreaElement | null>
   onExecute: (text: string) => void
-  envs: RepoEnv[]
-  selectedEnvId: string | null
-  setSelectedEnvId: (id: string | null) => void
-  selectedBranch: string
   streaming: boolean
+  workspaces: Workspace[]
+  selectedSlug: string
+  setSelectedSlug: (s: string) => void
+  selectedBranch: string
+  setSelectedBranch: (b: string) => void
+  token: string
 }
 
 function EmptyState({
-  input, setInput, inputRef, onExecute,
-  envs, selectedEnvId, setSelectedEnvId, selectedBranch, streaming,
+  input, setInput, inputRef, onExecute, streaming,
+  workspaces, selectedSlug, setSelectedSlug,
+  selectedBranch, setSelectedBranch, token,
 }: EmptyStateProps) {
-  const selectedEnv = envs.find((e) => e.id === selectedEnvId)
+  const [branches, setBranches] = useState<string[]>([])
+  const [loadedSlug, setLoadedSlug] = useState('')
+  const branchesLoading = !!selectedSlug && loadedSlug !== selectedSlug
+
+  useEffect(() => {
+    if (!selectedSlug) return
+    let cancelled = false
+    fetchBranches(token, selectedSlug).then(({ branches: list, default: def }) => {
+      if (cancelled) return
+      setBranches(list)
+      setLoadedSlug(selectedSlug)
+      setSelectedBranch((prev) => (list.includes(prev) ? prev : def))
+    })
+    return () => { cancelled = true }
+  }, [selectedSlug, token, setSelectedBranch])
 
   function handleKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey && !streaming) {
@@ -553,6 +569,55 @@ function EmptyState({
                 <button className={styles.toolbarBtn} title="Anexar">
                   <span className={styles.icon}>attachment</span>
                 </button>
+                {workspaces.length > 0 && (
+                  <div className={styles.contextPill} style={{ marginLeft: '0.5rem' }}>
+                    <span className={styles.icon} style={{ fontSize: '0.875rem', opacity: 0.6 }}>
+                      source
+                    </span>
+                    <span className={styles.contextPillLabel}>
+                      {workspaces.find(w => w.slug === selectedSlug)?.name ?? selectedSlug}
+                    </span>
+                    <span className={styles.icon} style={{ fontSize: '0.75rem', opacity: 0.35 }}>
+                      expand_more
+                    </span>
+                    <select
+                      className={styles.contextPillSelect}
+                      value={selectedSlug}
+                      onChange={(e) => setSelectedSlug(e.target.value)}
+                      title="Selecionar repositório"
+                    >
+                      {workspaces.map((w) => (
+                        <option key={w.slug} value={w.slug}>
+                          {w.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {selectedSlug && (
+                  <div className={styles.contextPill} style={{ marginLeft: '0.25rem' }}>
+                    <span className={styles.icon} style={{ fontSize: '0.875rem', opacity: 0.6 }}>
+                      fork_right
+                    </span>
+                    <span className={styles.contextPillLabel}>
+                      {branchesLoading ? '…' : (selectedBranch || 'main')}
+                    </span>
+                    <span className={styles.icon} style={{ fontSize: '0.75rem', opacity: 0.35 }}>
+                      expand_more
+                    </span>
+                    <select
+                      className={styles.contextPillSelect}
+                      value={selectedBranch}
+                      onChange={(e) => setSelectedBranch(e.target.value)}
+                      disabled={branchesLoading}
+                      title="Selecionar branch"
+                    >
+                      {branches.map((b) => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
               <div className={styles.commandToolbarRight}>
@@ -566,66 +631,6 @@ function EmptyState({
                 </button>
               </div>
             </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Context Bar — repo à esquerda, env à direita */}
-      <div className={styles.contextBar}>
-        <div className={styles.contextBarLeft}>
-          {/* Repo + branch pill */}
-          {selectedEnv ? (
-            <div className={styles.contextPill}>
-              <span className={styles.icon} style={{ fontSize: '0.875rem', opacity: 0.6 }}>
-                source
-              </span>
-              <span className={styles.contextPillLabel}>
-                {selectedEnv.name}
-              </span>
-              <span className={styles.contextPillSep} />
-              <span className={styles.icon} style={{ fontSize: '0.875rem', opacity: 0.6 }}>
-                fork_right
-              </span>
-              <span className={styles.contextPillLabel}>{selectedBranch || selectedEnv.branch}</span>
-            </div>
-          ) : (
-            <div className={`${styles.contextPill} ${styles.contextPillEmpty}`}>
-              <span className={styles.icon} style={{ fontSize: '0.875rem', opacity: 0.5 }}>
-                source
-              </span>
-              <span className={styles.contextPillLabel} style={{ opacity: 0.5 }}>Selecionar repo…</span>
-            </div>
-          )}
-          <Link to="/environments" className={styles.contextPillAdd} title="Adicionar ambiente">
-            <span className={styles.icon} style={{ fontSize: '1rem' }}>add</span>
-          </Link>
-        </div>
-
-        <div className={styles.contextBarRight}>
-          {/* Env pill */}
-          <div className={styles.contextPill} title="Selecionar ambiente">
-            <span className={styles.icon} style={{ fontSize: '0.875rem', opacity: 0.6 }}>
-              inventory_2
-            </span>
-            <span className={styles.contextPillLabel}>
-              {selectedEnv?.name ?? 'Sem ambiente'}
-            </span>
-            <span className={styles.icon} style={{ fontSize: '0.75rem', opacity: 0.35 }}>
-              expand_more
-            </span>
-            <select
-              className={styles.contextPillSelect}
-              value={selectedEnvId ?? ''}
-              onChange={(e) => setSelectedEnvId(e.target.value || null)}
-              title="Selecionar ambiente"
-            >
-              <option value="">Sem ambiente</option>
-              {envs.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.name} ({e.slug})
-                </option>
-              ))}
-            </select>
           </div>
         </div>
       </div>
@@ -681,24 +686,20 @@ interface ActiveChatProps {
   streaming: boolean
   input: string
   setInput: (v: string) => void
-  inputRef: React.RefObject<HTMLTextAreaElement>
+  inputRef: React.RefObject<HTMLTextAreaElement | null>
   onSend: () => void
   onStop: () => void
   onActionReply: (r: string) => void
   activeEnvSlug: string | null
   activeEnvName: string | null
   activeBaseBranch: string | null
+  workspaces: Workspace[]
   diffStats: { added: number; removed: number } | null
   prLoading: boolean
   prUrl: string | null
   headBranch: string | null
   onCreatePr: () => void
   activeTitle: string
-  envs: RepoEnv[]
-  selectedEnvId: string | null
-  setSelectedEnvId: (id: string | null) => void
-  selectedBranch: string
-  setSelectedBranch: (v: string) => void
   token: string
   conversationId: string
   sidePanel: 'none' | 'diff' | 'files'
@@ -712,10 +713,9 @@ function ActiveChat({
   messages, pendingText, pendingTools, pendingAction,
   showThinking, streaming, input, setInput, inputRef,
   onSend, onStop, onActionReply, activeEnvSlug, activeEnvName, activeBaseBranch,
+  workspaces,
   diffStats, prLoading, prUrl, headBranch, onCreatePr,
-  activeTitle: _activeTitle, envs: _envs,
-  selectedEnvId: _selectedEnvId, setSelectedEnvId: _setSelectedEnvId,
-  selectedBranch: _selectedBranch, setSelectedBranch: _setSelectedBranch,
+  activeTitle: _activeTitle,
   token, conversationId, sidePanel, diff, diffLoading, onOpenDiff, onToggleFiles,
 }: ActiveChatProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -864,13 +864,28 @@ function ActiveChat({
           )}
         </div>
 
-        {/* Context status bar — env read-only */}
+        {/* Context status bar — repo pill */}
         <div className={styles.chatContextBar}>
           <div className={styles.chatContextPill}>
-            <span className={`${styles.icon} ${styles.chatContextIcon}`}>inventory_2</span>
+            <span className={`${styles.icon} ${styles.chatContextIcon}`}>source</span>
             <span className={styles.chatContextText}>
-              {activeEnvName ?? activeEnvSlug ?? 'Sem ambiente'}
+              {activeEnvName ?? activeEnvSlug ?? workspaces[0]?.name ?? '—'}
             </span>
+            {workspaces.length > 1 && (
+              <>
+                <span className={styles.icon} style={{ fontSize: '0.75rem', opacity: 0.35 }}>expand_more</span>
+                <select
+                  className={styles.contextPillSelect}
+                  value={activeEnvSlug ?? workspaces[0]?.slug ?? ''}
+                  disabled
+                  title="Repo da conversa (definido ao criar)"
+                >
+                  {workspaces.map((w) => (
+                    <option key={w.slug} value={w.slug}>{w.name}</option>
+                  ))}
+                </select>
+              </>
+            )}
           </div>
         </div>
       </div>

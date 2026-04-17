@@ -120,6 +120,11 @@ class Conversation(Base):
     )
     title: Mapped[str] = mapped_column(String(512), default="Nova conversa")
     base_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Repo slug from WORKSPACE_REPOS — stored directly (no FK needed).
+    env_slug: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    # Immutable git branch and worktree path created at conversation start.
+    worktree_branch: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    worktree_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     github_pr_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     github_repo_slug: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

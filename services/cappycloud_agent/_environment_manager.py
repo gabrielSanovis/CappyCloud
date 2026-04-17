@@ -75,6 +75,9 @@ class EnvironmentManager:
         user_id: str,
         chat_id: str,
         base_branch: str = "",
+        repo_slug: str = "default",
+        worktree_branch: str = "",
+        worktree_path: str = "",
     ) -> SandboxRecord:
         """Return a SandboxRecord for the conversation, creating a git worktree if needed."""
         record = await self._store.get(user_id, chat_id)
@@ -90,7 +93,11 @@ class EnvironmentManager:
             )
             await self._store.delete(user_id, chat_id)
 
-        return await self._create_worktree_session(user_id, chat_id, base_branch)
+        return await self._create_worktree_session(
+            user_id, chat_id, base_branch, repo_slug,
+            worktree_branch=worktree_branch,
+            worktree_path=worktree_path,
+        )
 
     async def destroy_session(self, user_id: str, chat_id: str) -> None:
         """Remove the worktree for a session."""
@@ -132,14 +139,26 @@ class EnvironmentManager:
         user_id: str,
         chat_id: str,
         base_branch: str = "main",
+        repo_slug: str = "default",
+        worktree_branch: str = "",
+        worktree_path: str = "",
     ) -> SandboxRecord:
-        """Create a git worktree for a new conversation and return its SandboxRecord."""
-        session_id = chat_id.replace("-", "")[:16]
-        worktree_path = f"/repos/default/sessions/{session_id}"
+        """Create a git worktree for a new conversation and return its SandboxRecord.
+
+        If worktree_branch / worktree_path are provided (from the DB), they are used
+        as-is.  Otherwise they are derived from repo_slug + a short session id so the
+        manager stays usable for legacy / test calls.
+        """
+        session_id = chat_id.replace("-", "")[:12]
+
+        # Use DB-provided values when available (canonical path); fall back to legacy naming.
+        _worktree_path = worktree_path or f"/repos/{repo_slug}/sessions/{session_id}"
+        _worktree_branch = worktree_branch or f"cappy/{repo_slug}/{session_id}"
 
         log.info(
-            "Creating worktree %r for %s/%s (base_branch=%s)",
-            worktree_path,
+            "Creating worktree %r (branch=%r) for %s/%s (base_branch=%s)",
+            _worktree_path,
+            _worktree_branch,
             user_id,
             chat_id,
             base_branch,
@@ -154,7 +173,14 @@ class EnvironmentManager:
 
         try:
             exit_code, output = container.exec_run(
-                ["/session_start.sh", "default", session_id, worktree_path, base_branch or "main"],
+                [
+                    "/session_start.sh",
+                    repo_slug,
+                    session_id,
+                    _worktree_path,
+                    base_branch or "main",
+                    _worktree_branch,
+                ],
             )
             output_str = output.decode("utf-8", errors="replace") if output else ""
             if exit_code != 0:
@@ -170,11 +196,11 @@ class EnvironmentManager:
         record = SandboxRecord(
             user_id=user_id,
             chat_id=chat_id,
-            env_slug="default",
+            env_slug=repo_slug,
             container_id=container.id,
             grpc_host=self._host,
             grpc_port=self._grpc_port,
-            worktree_path=worktree_path,
+            worktree_path=_worktree_path,
         )
         await self._store.save(record)
 

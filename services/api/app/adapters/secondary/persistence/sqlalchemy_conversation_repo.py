@@ -47,6 +47,9 @@ class SQLAlchemyConversationRepository(ConversationRepository):
             title=conversation.title,
             environment_id=conversation.environment_id,
             base_branch=conversation.base_branch,
+            env_slug=conversation.env_slug,
+            worktree_branch=conversation.worktree_branch,
+            worktree_path=conversation.worktree_path,
         )
         self._session.add(orm)
         await self._session.commit()
@@ -72,7 +75,8 @@ class SQLAlchemyConversationRepository(ConversationRepository):
 
     @staticmethod
     def _to_entity(row: ConvORM) -> ConvEntity:
-        env_slug = row.environment.slug if row.environment else None
+        # Prefer the stored env_slug column; fall back to relationship for legacy rows.
+        env_slug = row.env_slug or (row.environment.slug if row.environment else None)
         return ConvEntity(
             id=row.id,
             user_id=row.user_id,
@@ -82,4 +86,6 @@ class SQLAlchemyConversationRepository(ConversationRepository):
             environment_id=row.environment_id,
             env_slug=env_slug,
             base_branch=row.base_branch,
+            worktree_branch=row.worktree_branch,
+            worktree_path=row.worktree_path,
         )

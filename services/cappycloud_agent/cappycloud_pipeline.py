@@ -126,6 +126,9 @@ class Pipeline:
 
         conversation_id = str(body.get("conversation_id") or "")
         base_branch = str(body.get("base_branch") or "")
+        repo_slug = str(body.get("env_slug") or "default")
+        worktree_branch = str(body.get("worktree_branch") or "")
+        worktree_path = str(body.get("worktree_path") or "")
         cursor = body.get("cursor")
         try:
             cursor = int(cursor) if cursor is not None else None
@@ -140,7 +143,27 @@ class Pipeline:
         if runner and runner.is_alive() and runner.pending_action:
             self._run(self._dispatcher.send_input(task_id, user_message), timeout=10)
         elif runner and runner.is_alive():
-            self._run(self._dispatcher.send_message(task_id, user_message), timeout=10)
+            # Agent is still streaming a response — cancel it and start a new task
+            # so the user's new message replaces the in-flight request.
+            log.info(
+                "pipe(): runner %s alive with no pending_action (mid-stream) — "
+                "cancelling and re-dispatching for conversation %s",
+                task_id[:8] if task_id else "?",
+                conversation_id[:8] if conversation_id else "?",
+            )
+            self._run(self._dispatcher.cancel_for_conversation(conversation_id), timeout=10)
+            task_id = self._run(
+                self._dispatcher.dispatch(
+                    prompt=user_message,
+                    conversation_id=conversation_id or None,
+                    triggered_by="user",
+                    base_branch=base_branch,
+                    repo_slug=repo_slug,
+                    worktree_branch=worktree_branch,
+                    worktree_path=worktree_path,
+                ),
+                timeout=10,
+            )
         else:
             task_id = self._run(
                 self._dispatcher.dispatch(
@@ -148,6 +171,9 @@ class Pipeline:
                     conversation_id=conversation_id or None,
                     triggered_by="user",
                     base_branch=base_branch,
+                    repo_slug=repo_slug,
+                    worktree_branch=worktree_branch,
+                    worktree_path=worktree_path,
                 ),
                 timeout=10,
             )
