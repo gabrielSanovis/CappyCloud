@@ -20,7 +20,7 @@ class AgentPort(ABC):
         model_id: str,
         messages: list[dict],
         body: dict,
-    ) -> Generator[str, None, None]:
+    ) -> Generator[str]:
         """Stream SSE-formatted chunks from the agent.
 
         Each yielded string is a complete SSE line, e.g.::

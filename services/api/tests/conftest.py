@@ -134,7 +134,7 @@ class FakeAgent(AgentPort):
         model_id: str,
         messages: list[dict],  # type: ignore[type-arg]
         body: dict,  # type: ignore[type-arg]
-    ) -> Generator[str, None, None]:
+    ) -> Generator[str]:
         payload = json.dumps({"type": "text", "content": self._response})
         yield f"data: {payload}\n\n"
         done = json.dumps({"type": "done"})

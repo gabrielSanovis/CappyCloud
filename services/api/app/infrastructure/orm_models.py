@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     Integer,
@@ -67,6 +68,32 @@ class JSONBType(TypeDecorator):
         return dialect.type_descriptor(JSONB())
 
 
+class Sandbox(Base):
+    """Instância do container sandbox que hospeda o openclaude gRPC.
+
+    Cada linha representa um container Docker independente.
+    status: active | draining | offline
+    """
+
+    __tablename__ = "sandboxes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    host: Mapped[str] = mapped_column(String(256), nullable=False)
+    grpc_port: Mapped[int] = mapped_column(Integer, nullable=False, default=50051)
+    session_port: Mapped[int] = mapped_column(Integer, nullable=False, default=8080)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    conversations: Mapped[list["Conversation"]] = relationship(
+        "Conversation", back_populates="sandbox"
+    )
+    sync_queue: Mapped[list["SandboxSyncQueue"]] = relationship(
+        "SandboxSyncQueue", back_populates="sandbox", cascade="all, delete-orphan"
+    )
+    repositories: Mapped[list["Repository"]] = relationship("Repository", back_populates="sandbox")
+
+
 class RepoEnvironment(Base):
     """Ambiente global (repositório git) partilhado por todos os utilizadores."""
 
@@ -79,7 +106,7 @@ class RepoEnvironment(Base):
     branch: Mapped[str] = mapped_column(String(256), nullable=False, default="main")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    conversations: Mapped[list[Conversation]] = relationship(
+    conversations: Mapped[list["Conversation"]] = relationship(
         "Conversation", back_populates="environment"
     )
     routines: Mapped[list["Routine"]] = relationship("Routine", back_populates="environment")
@@ -118,11 +145,38 @@ class Conversation(Base):
         nullable=True,
         index=True,
     )
+    sandbox_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType,
+        ForeignKey("sandboxes.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    ai_model_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType,
+        ForeignKey("ai_models.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     title: Mapped[str] = mapped_column(String(512), default="Nova conversa")
+    # Multi-repo: lista de {slug, alias, base_branch, branch_name, worktree_path}
+    repos: Mapped[list] = mapped_column(JSONBType, nullable=False, server_default="[]")
+    # Diretório raiz da sessão no volume: /repos/sessions/<short_id>/
+    session_root: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Worktree state
+    worktree_exists: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    lines_added: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    lines_removed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    files_changed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # PR tracking
+    pr_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pr_status: Mapped[str] = mapped_column(String(32), nullable=False, default="none")
+    pr_approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # CI tracking
+    ci_status: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown")
+    ci_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Legacy single-repo fields (mantidos para conversas existentes)
     base_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    # Repo slug from WORKSPACE_REPOS — stored directly (no FK needed).
     env_slug: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
-    # Immutable git branch and worktree path created at conversation start.
     worktree_branch: Mapped[str | None] = mapped_column(String(512), nullable=True)
     worktree_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     github_pr_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -136,6 +190,8 @@ class Conversation(Base):
     environment: Mapped[RepoEnvironment | None] = relationship(
         "RepoEnvironment", back_populates="conversations"
     )
+    sandbox: Mapped["Sandbox | None"] = relationship("Sandbox", back_populates="conversations")
+    ai_model: Mapped["AiModel | None"] = relationship("AiModel", back_populates="conversations")
     messages: Mapped[list[Message]] = relationship(
         "Message", back_populates="conversation", cascade="all, delete-orphan"
     )
@@ -169,7 +225,7 @@ class Message(Base):
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="messages")
 
 
-# Import agent models last so Base.metadata contains all tables for Alembic.
+# Import platform and agent models last — registers tables with Base.metadata for Alembic.
 from app.infrastructure.orm_models_agent import (  # noqa: F401, E402
     AgentEvent,
     AgentTask,
@@ -178,4 +234,11 @@ from app.infrastructure.orm_models_agent import (  # noqa: F401, E402
     PrSubscription,
     Routine,
     RoutineRun,
+)
+from app.infrastructure.orm_models_platform import (  # noqa: F401, E402
+    AiModel,
+    AiProvider,
+    GitProvider,
+    Repository,
+    SandboxSyncQueue,
 )
