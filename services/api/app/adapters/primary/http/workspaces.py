@@ -89,7 +89,7 @@ async def list_branches(slug: str) -> BranchesOut:
             continue
         # remove "origin/" prefix
         if b.startswith("origin/"):
-            b = b[len("origin/"):]
+            b = b[len("origin/") :]
         if b and b not in branches:
             branches.append(b)
 
