@@ -29,10 +29,10 @@ class PipelineAdapter(AgentPort):
         model_id: str,
         messages: list[dict],
         body: dict,
-    ) -> Generator[str, None, None]:
+    ) -> Generator[str]:
         """Delegate streaming to the underlying Pipeline.pipe()."""
         result = self._pipeline.pipe(user_message, model_id, messages, body)
-        return cast(Generator[str, None, None], result)
+        return cast(Generator[str], result)
 
     async def dispatch(
         self,

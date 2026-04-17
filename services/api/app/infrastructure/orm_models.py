@@ -106,7 +106,9 @@ class GitProvider(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
-    provider_type: Mapped[str] = mapped_column(String(32), nullable=False, default="github", index=True)
+    provider_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="github", index=True
+    )
     base_url: Mapped[str] = mapped_column(Text, nullable=False, default="")
     org_or_project: Mapped[str] = mapped_column(Text, nullable=False, default="")
     token_encrypted: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -128,7 +130,9 @@ class AiProvider(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
-    base_url: Mapped[str] = mapped_column(Text, nullable=False, default="https://openrouter.ai/api/v1")
+    base_url: Mapped[str] = mapped_column(
+        Text, nullable=False, default="https://openrouter.ai/api/v1"
+    )
     api_key_encrypted: Mapped[str] = mapped_column(Text, nullable=False, default="")
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -187,7 +191,9 @@ class Repository(Base):
     sandbox_id: Mapped[uuid.UUID | None] = mapped_column(
         UUIDType, ForeignKey("sandboxes.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    sandbox_status: Mapped[str] = mapped_column(String(32), nullable=False, default="not_cloned", index=True)
+    sandbox_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="not_cloned", index=True
+    )
     sandbox_path: Mapped[str] = mapped_column(Text, nullable=False, default="")
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -197,8 +203,12 @@ class Repository(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    provider: Mapped["GitProvider | None"] = relationship("GitProvider", back_populates="repositories")
-    sandbox: Mapped["Sandbox | None"] = relationship("Sandbox", back_populates="repositories")
+    provider: Mapped["GitProvider | None"] = relationship(
+        "GitProvider", back_populates="repositories"
+    )
+    sandbox: Mapped["Sandbox | None"] = relationship(
+        "Sandbox", back_populates="repositories"
+    )
 
 
 class SandboxSyncQueue(Base):

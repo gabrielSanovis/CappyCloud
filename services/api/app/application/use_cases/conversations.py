@@ -131,7 +131,7 @@ class StreamMessage:
         content: str,
         model_id: str = "cappycloud",
         cursor: int | None = None,
-    ) -> AsyncGenerator[bytes, None]:
+    ) -> AsyncGenerator[bytes]:
         conv = await self._conversations.get(conversation_id, user_id)
         if not conv:
             raise LookupError("Conversa não encontrada.")
@@ -220,7 +220,7 @@ class StreamMessage:
         messages_payload: list[dict],
         pipeline_body: dict,
         conversation_id: uuid.UUID,
-    ) -> AsyncGenerator[bytes, None]:
+    ) -> AsyncGenerator[bytes]:
         accumulated_text: list[str] = []
         accumulated_error: list[str] = []
         gen = self._agent.pipe(content, model_id, messages_payload, pipeline_body)

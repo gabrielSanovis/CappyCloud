@@ -29,8 +29,9 @@ class _Encryptor:
         else:
             raise ValueError(
                 "ENCRYPTION_KEY must be a 32-byte hex string (64 hex chars) "
-                "or a 44-char Fernet key. Generate one with: "
-                "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+                "or a 44-char Fernet key. Generate with: "
+                "python -c 'from cryptography.fernet import Fernet; "
+                "print(Fernet.generate_key().decode())'"
             )
         self._f = Fernet(key_bytes)
 

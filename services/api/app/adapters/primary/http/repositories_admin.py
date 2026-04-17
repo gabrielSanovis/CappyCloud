@@ -63,7 +63,11 @@ async def enqueue_sync(
         id=uuid.uuid4(),
         sandbox_id=repo.sandbox_id,
         operation="clone_repo",
-        payload={"slug": repo.slug, "clone_url": repo.clone_url, "default_branch": repo.default_branch},
+        payload={
+            "slug": repo.slug,
+            "clone_url": repo.clone_url,
+            "default_branch": repo.default_branch,
+        },
         priority=5,
     )
     session.add(item)
