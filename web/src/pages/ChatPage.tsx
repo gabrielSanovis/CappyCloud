@@ -762,15 +762,15 @@ function ActiveChat({
   token, conversationId, sidePanel, diff, diffLoading, onOpenDiff, onToggleFiles,
 }: ActiveChatProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
-  const streamingStartRef = useRef<number>(0)
-  const [, setTick] = useState(0)
-  const elapsedSecs = streaming ? Math.floor((Date.now() - streamingStartRef.current) / 1000) : 0
+  const [elapsedSecs, setElapsedSecs] = useState(0)
 
   useEffect(() => {
     if (!streaming) return
-    streamingStartRef.current = Date.now()
-    const id = setInterval(() => setTick((t) => t + 1), 1000)
-    return () => clearInterval(id)
+    const id = setInterval(() => setElapsedSecs((s) => s + 1), 1000)
+    return () => {
+      clearInterval(id)
+      setElapsedSecs(0)
+    }
   }, [streaming])
 
   useEffect(() => {
