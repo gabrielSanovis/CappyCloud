@@ -1,14 +1,14 @@
 -- ──────────────────────────────────────────────────────────────
--- Migration 01 — Sandboxes escaláveis + sessões multi-repo
+-- Init 01 — Sandboxes registry
 --
 -- Roda uma única vez no init do volume PostgreSQL (após 00-extensions.sql).
--- Caso o banco já exista, todas as operações são idempotentes (IF NOT EXISTS,
--- ADD COLUMN IF NOT EXISTS, ON CONFLICT DO NOTHING).
+-- Apenas cria a tabela `sandboxes` e insere o sandbox padrão.
 --
--- Novo modelo:
---   sandboxes   — registry de instâncias do container sandbox
---   conversations — ganha repos JSONB (multi-repo), session_root, sandbox_id
---   agent_tasks — ganha sandbox_id
+-- IMPORTANTE: ALTER TABLE em `conversations` e `agent_tasks` foram
+-- REMOVIDOS daqui — essas colunas são gerenciadas pelas migrations
+-- Alembic (20260419_191734 e posteriores). Manter os ALTERs aqui
+-- causaria erro ao inicializar um volume novo, pois o Alembic ainda
+-- não rodou e a tabela `conversations` não existe.
 -- ──────────────────────────────────────────────────────────────
 
 -- ── Sandboxes ─────────────────────────────────────────────────
@@ -28,21 +28,3 @@ CREATE TABLE IF NOT EXISTS sandboxes (
 INSERT INTO sandboxes (name, host, grpc_port, session_port, status)
 VALUES ('cappycloud-sandbox', 'cappycloud-sandbox', 50051, 8080, 'active')
 ON CONFLICT (name) DO NOTHING;
-
--- ── conversations: suporte a multi-repo ───────────────────────
--- repos: lista ordenada de {slug, alias, base_branch, branch_name, worktree_path}
--- session_root: diretório raiz da sessão no volume, ex.: /repos/sessions/<short_id>/
--- sandbox_id: qual sandbox hospeda esta sessão (FK soft — sem FK hard para evitar
---             bloqueio se sandbox for deletado)
-ALTER TABLE conversations
-    ADD COLUMN IF NOT EXISTS repos        JSONB   NOT NULL DEFAULT '[]',
-    ADD COLUMN IF NOT EXISTS session_root TEXT,
-    ADD COLUMN IF NOT EXISTS sandbox_id   UUID    REFERENCES sandboxes(id) ON DELETE SET NULL;
-
-CREATE INDEX IF NOT EXISTS ix_conversations_sandbox_id ON conversations(sandbox_id);
-
--- ── agent_tasks: referência ao sandbox ───────────────────────
-ALTER TABLE agent_tasks
-    ADD COLUMN IF NOT EXISTS sandbox_id UUID REFERENCES sandboxes(id) ON DELETE SET NULL;
-
-CREATE INDEX IF NOT EXISTS ix_agent_tasks_sandbox_id ON agent_tasks(sandbox_id);

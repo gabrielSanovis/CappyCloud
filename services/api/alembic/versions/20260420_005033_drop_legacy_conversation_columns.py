@@ -29,10 +29,17 @@ def upgrade() -> None:
     op.drop_column("conversations", "worktree_branch")
     op.drop_column("conversations", "worktree_path")
 
-    # cappy_sessions: remover colunas legacy
-    op.drop_column("cappy_sessions", "env_slug")
-    op.drop_column("cappy_sessions", "container_id")
-    op.drop_column("cappy_sessions", "worktree_path")
+    # cappy_sessions: remover colunas legacy (tabela pode não existir em volumes novos)
+    op.execute("""
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'cappy_sessions') THEN
+                ALTER TABLE cappy_sessions
+                    DROP COLUMN IF EXISTS env_slug,
+                    DROP COLUMN IF EXISTS container_id,
+                    DROP COLUMN IF EXISTS worktree_path;
+            END IF;
+        END $$;
+    """)
 
 
 def downgrade() -> None:

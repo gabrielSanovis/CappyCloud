@@ -1,14 +1,13 @@
 -- ──────────────────────────────────────────────────────────────
--- Migration 02 — Platform Control Plane
+-- Init 02 — Platform Control Plane
 --
--- Tudo que estava no .env agora vive no banco:
---   git_providers  — tokens de GitHub/Azure DevOps/GitLab (criptografados)
---   ai_providers   — chaves de API de provedores LLM
---   ai_models      — catálogo de modelos com capabilities
---   repositories   — repos git com estado de sync no sandbox
---   sandbox_sync_queue — fila do cão de guarda (DB → sandbox VM)
+-- Cria tabelas de plataforma e faz seed de dados iniciais.
+-- Tudo que está aqui é idempotente (IF NOT EXISTS / ON CONFLICT DO NOTHING).
 --
--- Conversas ganham rastreamento de PR, CI e diff stats.
+-- IMPORTANTE: ALTER TABLE em `conversations` foi REMOVIDO daqui.
+-- As colunas de AI model, PR, CI e diff-stats são gerenciadas pelo
+-- Alembic (migration 20260419_191734 e posteriores). Rodar os ALTERs
+-- aqui causaria erro em volumes novos pois o Alembic ainda não rodou.
 -- ──────────────────────────────────────────────────────────────
 
 -- ── Provedores de repositórios git ───────────────────────────
@@ -118,18 +117,3 @@ CREATE TABLE IF NOT EXISTS sandbox_sync_queue (
 
 CREATE INDEX IF NOT EXISTS ix_sync_queue_status   ON sandbox_sync_queue(status, priority, created_at);
 CREATE INDEX IF NOT EXISTS ix_sync_queue_sandbox  ON sandbox_sync_queue(sandbox_id);
-
--- ── Conversations: rastreamento de PR, CI e diff ─────────────
-ALTER TABLE conversations
-    ADD COLUMN IF NOT EXISTS ai_model_id    UUID    REFERENCES ai_models(id) ON DELETE SET NULL,
-    ADD COLUMN IF NOT EXISTS worktree_exists BOOLEAN NOT NULL DEFAULT false,
-    ADD COLUMN IF NOT EXISTS lines_added    INTEGER  NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS lines_removed  INTEGER  NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS files_changed  INTEGER  NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS pr_url         TEXT,
-    ADD COLUMN IF NOT EXISTS pr_status      VARCHAR(32) NOT NULL DEFAULT 'none',
-    ADD COLUMN IF NOT EXISTS pr_approved    BOOLEAN  NOT NULL DEFAULT false,
-    ADD COLUMN IF NOT EXISTS ci_status      VARCHAR(32) NOT NULL DEFAULT 'unknown',
-    ADD COLUMN IF NOT EXISTS ci_url         TEXT;
-
-CREATE INDEX IF NOT EXISTS ix_conversations_ai_model ON conversations(ai_model_id);
