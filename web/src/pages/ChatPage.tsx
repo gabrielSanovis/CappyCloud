@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Burger,
@@ -448,9 +448,13 @@ export function ChatPage() {
 
           {/* Sidebar bottom nav */}
           <div className={styles.sidebarNav}>
-            <Link to="/agents" className={styles.sidebarNavItem} title="Agentes & Skills">
+            <Link to="/agents" className={styles.sidebarNavItem} title="Agentes">
               <span className={styles.icon}>support_agent</span>
               <span>Agentes</span>
+            </Link>
+            <Link to="/skills" className={styles.sidebarNavItem} title="Skills">
+              <span className={styles.icon}>menu_book</span>
+              <span>Skills</span>
             </Link>
             <Link to="/settings" className={styles.sidebarNavItem} title="Configurações">
               <span className={styles.icon}>settings</span>
@@ -534,7 +538,7 @@ interface EmptyStateProps {
   selectedSlug: string
   setSelectedSlug: (s: string) => void
   selectedBranch: string
-  setSelectedBranch: (b: string) => void
+  setSelectedBranch: Dispatch<SetStateAction<string>>
   agents: Agent[]
   selectedAgentId: string
   setSelectedAgentId: (id: string) => void
