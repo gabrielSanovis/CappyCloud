@@ -53,6 +53,7 @@ class CreateConversation:
         sandbox_id: uuid.UUID | None = None,
         ai_model_id: uuid.UUID | None = None,
         repos: list[dict] | None = None,
+        agent_id: uuid.UUID | None = None,
     ) -> Conversation:
         conv_id = uuid.uuid4()
         short_id = conv_id.hex[:12]
@@ -82,6 +83,7 @@ class CreateConversation:
             title=title or _DEFAULT_TITLE,
             sandbox_id=sandbox_id,
             ai_model_id=ai_model_id,
+            agent_id=agent_id,
             repos=resolved_repos,
             session_root=session_root,
         )
@@ -187,6 +189,7 @@ class StreamMessage:
             "repos": conv.repos,
             "session_root": conv.session_root or "",
             "sandbox_id": str(conv.sandbox_id) if conv.sandbox_id else "",
+            "agent_id": str(conv.agent_id) if conv.agent_id else "",
         }
 
     async def _inject_diff_comments(self, conversation_id: uuid.UUID, content: str) -> str:
