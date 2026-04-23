@@ -121,6 +121,7 @@ class Pipeline:
             return
 
         conversation_id = str(body.get("conversation_id") or "")
+        log.info(f"Pipeline.pipe() for conversation {conversation_id} using model: {model_id}")
         repos = body.get("repos") or []
         session_root = str(body.get("session_root") or "")
         sandbox_id = str(body.get("sandbox_id") or "")
@@ -153,6 +154,7 @@ class Pipeline:
                     prompt=user_message,
                     conversation_id=conversation_id or None,
                     triggered_by="user",
+                    model=model_id,
                     **dispatch_kwargs,
                 ),
                 timeout=10,
@@ -163,6 +165,7 @@ class Pipeline:
                     prompt=user_message,
                     conversation_id=conversation_id or None,
                     triggered_by="user",
+                    model=model_id,
                     **dispatch_kwargs,
                 ),
                 timeout=10,

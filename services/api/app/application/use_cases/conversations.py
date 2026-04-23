@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -12,10 +13,13 @@ from app.ports.agent import AgentPort
 from app.ports.repositories import (
     ConversationRepository,
     MessageRepository,
+    AiModelRepository,
 )
 
 _TITLE_MAX_LEN = 80
 _DEFAULT_TITLE = "Nova conversa"
+
+logger = logging.getLogger(__name__)
 
 
 def _next_chunk(gen):
@@ -47,6 +51,7 @@ class CreateConversation:
         user_id: uuid.UUID,
         title: str | None = None,
         sandbox_id: uuid.UUID | None = None,
+        ai_model_id: uuid.UUID | None = None,
         repos: list[dict] | None = None,
     ) -> Conversation:
         conv_id = uuid.uuid4()
@@ -76,6 +81,7 @@ class CreateConversation:
             user_id=user_id,
             title=title or _DEFAULT_TITLE,
             sandbox_id=sandbox_id,
+            ai_model_id=ai_model_id,
             repos=resolved_repos,
             session_root=session_root,
         )
@@ -105,10 +111,12 @@ class StreamMessage:
         self,
         conversations: ConversationRepository,
         messages: MessageRepository,
+        ai_models: AiModelRepository,
         agent: AgentPort,
     ) -> None:
         self._conversations = conversations
         self._messages = messages
+        self._ai_models = ai_models
         self._agent = agent
 
     async def execute(
@@ -116,7 +124,7 @@ class StreamMessage:
         conversation_id: uuid.UUID,
         user_id: uuid.UUID,
         content: str,
-        model_id: str = "cappycloud",
+        ai_model_id: uuid.UUID | None = None,
         cursor: int | None = None,
     ) -> AsyncGenerator[bytes]:
         conv = await self._conversations.get(conversation_id, user_id)
@@ -138,13 +146,31 @@ class StreamMessage:
             conv.title = content[:_TITLE_MAX_LEN] + ("…" if len(content) > _TITLE_MAX_LEN else "")
             await self._conversations.update(conv)
 
+        # Resolve model_id (string) from ai_model_id (UUID)
+        # 1. Check if model was passed in this request
+        # 2. Check if conversation has a fixed model
+        # 3. Fallback to default
+        actual_model_id = "cappycloud"
+        resolved_ai_model_id = ai_model_id or conv.ai_model_id
+
+        if resolved_ai_model_id:
+            model_entity = await self._ai_models.get(resolved_ai_model_id)
+            if model_entity:
+                actual_model_id = model_entity.model_id
+            
+            # If changed mid-conversation, update conversation
+            if ai_model_id and ai_model_id != conv.ai_model_id:
+                conv.ai_model_id = ai_model_id
+                await self._conversations.update(conv)
+
         history = await self._messages.list_by_conversation(conversation_id)
         messages_payload = [{"role": m.role, "content": m.content} for m in history]
 
         pipeline_body = self._build_pipeline_body(conv, user_id, cursor)
+        logger.info(f"[StreamMessage] Conversation {conversation_id} resolved model: {actual_model_id}")
 
         return self._stream_chunks(
-            injected_prompt, model_id, messages_payload, pipeline_body, conversation_id
+            injected_prompt, actual_model_id, messages_payload, pipeline_body, conversation_id
         )
 
     def _build_pipeline_body(

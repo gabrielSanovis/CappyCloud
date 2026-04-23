@@ -48,6 +48,12 @@ class AgentTask(Base):
         index=True,
     )
     env_slug: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    ai_model_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType,
+        ForeignKey("ai_models.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     session_id: Mapped[str] = mapped_column(String(256), nullable=False, default="")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
     triggered_by: Mapped[str] = mapped_column(String(32), nullable=False, default="user")

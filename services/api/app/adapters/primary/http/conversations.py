@@ -61,6 +61,7 @@ async def create_conversation(
         current.id,
         title=b.title,
         sandbox_id=b.sandbox_id,
+        ai_model_id=b.ai_model_id,
         repos=repos_dicts,
     )
     return ConversationOut(
@@ -107,7 +108,9 @@ async def stream_message(
     o stream retoma a partir desse ponto sem perder eventos.
     """
     try:
-        stream = await uc.execute(conversation_id, current.id, body.content, cursor=cursor)
+        stream = await uc.execute(
+            conversation_id, current.id, body.content, ai_model_id=body.ai_model_id, cursor=cursor
+        )
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return StreamingResponse(

@@ -108,6 +108,7 @@ class ConversationCreate(BaseModel):
 
     title: str | None = Field(default="Nova conversa", max_length=512)
     sandbox_id: uuid.UUID | None = None
+    ai_model_id: uuid.UUID | None = None
     repos: list[RepoSelection] = Field(default_factory=list)
 
 
@@ -238,3 +239,4 @@ class MessageOut(BaseModel):
 
 class SendMessageBody(BaseModel):
     content: str = Field(min_length=1, max_length=1_000_000)
+    ai_model_id: uuid.UUID | None = None

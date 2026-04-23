@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from abc import ABC, abstractmethod
 
-from app.domain.entities import Conversation, Message, RepoEnvironment, User
+from app.domain.entities import AiModel, Conversation, Message, RepoEnvironment, User
 
 
 class UserRepository(ABC):
@@ -82,3 +82,15 @@ class MessageRepository(ABC):
     @abstractmethod
     async def save(self, message: Message) -> Message:
         """Persist a new message and return it."""
+
+
+class AiModelRepository(ABC):
+    """Port for AI model persistence operations."""
+
+    @abstractmethod
+    async def get(self, model_id: uuid.UUID) -> AiModel | None:
+        """Return AI model by primary key."""
+
+    @abstractmethod
+    async def list_active(self) -> list[AiModel]:
+        """Return all active AI models."""

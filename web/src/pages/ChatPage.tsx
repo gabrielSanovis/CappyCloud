@@ -14,6 +14,7 @@ import {
   cancelConversation,
   createConversation,
   createConversationPr,
+  fetchAiModels,
   fetchBranches,
   fetchConversationDiff,
   fetchConversations,
@@ -23,6 +24,7 @@ import {
   setToken,
   streamAssistantReply,
   type ActionRequiredEvent,
+  type AiModel,
   type ChatMessage,
   type Conversation,
   type ConversationDiff,
@@ -73,6 +75,9 @@ export function ChatPage() {
   const [selectedSlug, setSelectedSlug] = useState<string>('')
   const [selectedBranch, setSelectedBranch] = useState<string>('')
 
+  const [aiModels, setAiModels] = useState<AiModel[]>([])
+  const [selectedAiModelId, setSelectedAiModelId] = useState<string | null>(null)
+
   const [pendingText, setPendingText] = useState('')
   const [pendingTools, setPendingTools] = useState<ToolCallState[]>([])
   const [pendingAction, setPendingAction] = useState<ActionRequiredEvent | null>(null)
@@ -100,11 +105,21 @@ export function ChatPage() {
     let cancelled = false
     ;(async () => {
       try {
-        const [convsResult, wsList] = await Promise.allSettled([
+        const [convsResult, wsList, modelList] = await Promise.allSettled([
           fetchConversations(token),
           fetchWorkspaces(token),
+          fetchAiModels(token),
         ])
         if (cancelled) return
+
+        if (modelList.status === 'fulfilled') {
+          setAiModels(modelList.value)
+          // Default to the first active model or the first one in the list
+          if (modelList.value.length > 0) {
+            const def = modelList.value.find(m => m.is_default?.text) ?? modelList.value[0]
+            setSelectedAiModelId(def.id)
+          }
+        }
 
         if (wsList.status === 'fulfilled') {
           setWorkspaces(wsList.value)
@@ -137,7 +152,12 @@ export function ChatPage() {
     setHeadBranch(null)
     ;(async () => {
       const msgs = await fetchMessages(token, activeId)
-      if (!cancelled) setMessages(msgs)
+      if (!cancelled) {
+        setMessages(msgs)
+        if (activeConv?.ai_model_id) {
+          setSelectedAiModelId(activeConv.ai_model_id)
+        }
+      }
     })()
     return () => { cancelled = true }
   }, [activeId, token])
@@ -191,7 +211,7 @@ export function ChatPage() {
   /** Cria conversa e envia a mensagem inicial de uma vez */
   async function handleNewChatWithMessage(text: string) {
     if (!text.trim()) return
-    const c = await createConversation(token, null, selectedBranch || null, selectedSlug || null)
+    const c = await createConversation(token, null, selectedBranch || null, selectedSlug || null, selectedAiModelId)
     setConversations((prev) => [c, ...prev])
     setActiveId(c.id)
     setMessages([])
@@ -244,7 +264,7 @@ export function ChatPage() {
           ])
         },
         signal: ctrl.signal,
-      })
+      }, selectedAiModelId)
       setPendingText('')
       setPendingTools([])
       const msgs = await fetchMessages(token, c.id)
@@ -324,7 +344,7 @@ export function ChatPage() {
           ])
         },
         signal: ctrl.signal,
-      })
+      }, selectedAiModelId)
       setPendingText('')
       setPendingTools([])
       const msgs = await fetchMessages(token, activeId)
@@ -463,6 +483,9 @@ export function ChatPage() {
             selectedBranch={selectedBranch}
             setSelectedBranch={setSelectedBranch}
             token={token}
+            aiModels={aiModels}
+            selectedAiModelId={selectedAiModelId}
+            setSelectedAiModelId={setSelectedAiModelId}
           />
           ) : (
             <ActiveChat
@@ -495,6 +518,9 @@ export function ChatPage() {
               diffLoading={diffLoading}
               onOpenDiff={handleOpenDiff}
               onToggleFiles={handleToggleFiles}
+              aiModels={aiModels}
+              selectedAiModelId={selectedAiModelId}
+              setSelectedAiModelId={setSelectedAiModelId}
             />
           )}
         </main>
@@ -518,12 +544,16 @@ interface EmptyStateProps {
   selectedBranch: string
   setSelectedBranch: (b: string) => void
   token: string
+  aiModels: AiModel[]
+  selectedAiModelId: string | null
+  setSelectedAiModelId: (id: string | null) => void
 }
 
 function EmptyState({
   input, setInput, inputRef, onExecute, streaming,
   workspaces, selectedSlug, setSelectedSlug,
   selectedBranch, setSelectedBranch, token,
+  aiModels, selectedAiModelId, setSelectedAiModelId,
 }: EmptyStateProps) {
   const [branches, setBranches] = useState<string[]>([])
   const [loadedSlug, setLoadedSlug] = useState('')
@@ -592,6 +622,34 @@ function EmptyState({
                 <button className={styles.toolbarBtn} title="Anexar" disabled={!selectedSlug || !selectedBranch}>
                   <span className={styles.icon}>attachment</span>
                 </button>
+
+                {aiModels.length > 0 && (
+                  <div
+                    className={styles.contextPill}
+                    style={{ marginLeft: '0.25rem' }}
+                  >
+                    <span className={styles.icon} style={{ fontSize: '0.875rem', opacity: 0.6 }}>
+                      psychology
+                    </span>
+                    <span className={styles.contextPillLabel}>
+                      {aiModels.find(m => m.id === selectedAiModelId)?.display_name ?? 'Modelo…'}
+                    </span>
+                    <span className={styles.icon} style={{ fontSize: '0.75rem', opacity: 0.35 }}>
+                      expand_more
+                    </span>
+                    <select
+                      className={styles.contextPillSelect}
+                      value={selectedAiModelId ?? ''}
+                      onChange={(e) => setSelectedAiModelId(e.target.value)}
+                      title="Selecionar modelo"
+                    >
+                      {aiModels.map((m) => (
+                        <option key={m.id} value={m.id}>{m.display_name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 {workspaces.length > 0 ? (
                   <div
                     className={`${styles.contextPill} ${repoRequired ? styles.contextPillRequired : ''}`}
@@ -750,6 +808,9 @@ interface ActiveChatProps {
   diffLoading: boolean
   onOpenDiff: () => void
   onToggleFiles: () => void
+  aiModels: AiModel[]
+  selectedAiModelId: string | null
+  setSelectedAiModelId: (id: string | null) => void
 }
 
 function ActiveChat({
@@ -759,7 +820,8 @@ function ActiveChat({
   workspaces,
   diffStats, prLoading, prUrl, headBranch, onCreatePr,
   activeTitle: _activeTitle,
-  token, conversationId, sidePanel, diff, diffLoading, onOpenDiff, onToggleFiles,
+  token, conversationId, sidePanel, diff, diffLoading,  onOpenDiff, onToggleFiles,
+  aiModels, selectedAiModelId, setSelectedAiModelId,
 }: ActiveChatProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [elapsedSecs, setElapsedSecs] = useState(0)
@@ -945,6 +1007,25 @@ function ActiveChat({
               </>
             )}
           </div>
+
+          {aiModels.length > 0 && (
+            <div className={styles.chatContextPill} title="Mudar modelo da conversa">
+              <span className={`${styles.icon} ${styles.chatContextIcon}`}>psychology</span>
+              <span className={styles.chatContextText}>
+                {aiModels.find(m => m.id === selectedAiModelId)?.display_name ?? 'Modelo'}
+              </span>
+              <span className={styles.icon} style={{ fontSize: '0.75rem', opacity: 0.35 }}>expand_more</span>
+              <select
+                className={styles.chatContextSelect}
+                value={selectedAiModelId ?? ''}
+                onChange={(e) => setSelectedAiModelId(e.target.value)}
+              >
+                {aiModels.map((m) => (
+                  <option key={m.id} value={m.id}>{m.display_name}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </div>
     </div>

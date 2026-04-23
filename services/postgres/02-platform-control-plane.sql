@@ -67,12 +67,16 @@ INSERT INTO ai_models (provider_id, model_id, display_name, capabilities, is_def
 SELECT p.id, m.model_id, m.display_name, m.capabilities::jsonb, m.is_default::jsonb, m.ctx
 FROM ai_providers p
 CROSS JOIN (VALUES
-    ('anthropic/claude-3.5-sonnet', 'Claude 3.5 Sonnet',   '["text","vision"]',        '{"text":true}',      200000),
-    ('anthropic/claude-3-haiku',    'Claude 3 Haiku',       '["text","vision"]',        '{}',                 200000),
-    ('openai/gpt-4o',               'GPT-4o',               '["text","vision"]',        '{"vision":true}',   128000),
-    ('openai/gpt-4o-mini',          'GPT-4o mini',          '["text"]',                 '{}',                128000),
-    ('openai/text-embedding-3-large','Embedding 3 Large',   '["embedding"]',            '{"embedding":true}',8192),
-    ('openai/gpt-4.1',              'GPT-4.1',              '["text","vision"]',        '{}',               1047576)
+    ('anthropic/claude-3.5-sonnet',    'Claude 3.5 Sonnet',   '["text","vision"]',        '{"text":true}',      200000),
+    ('anthropic/claude-3-haiku',       'Claude 3 Haiku',      '["text","vision"]',        '{}',                 200000),
+    ('openai/gpt-4o',                  'GPT-4o',              '["text","vision"]',        '{"vision":true}',    128000),
+    ('openai/gpt-4o-mini',             'GPT-4o mini',         '["text"]',                 '{}',                 128000),
+    ('openai/text-embedding-3-large',  'Embedding 3 Large',   '["embedding"]',            '{"embedding":true}',   8192),
+    ('openai/gpt-4.1',                 'GPT-4.1',             '["text","vision"]',        '{}',                1047576),
+    ('inclusionai/ling-2.6-flash:free','Ling 2.6 flash',      '["text"]',                 '{"text":true}',      262144),
+    ('google/gemma-4-26b-a4b-it:free', 'Gemma 4 26B-A4B',     '["text"]',                 '{"text":true}',      262144),
+    ('openai/gpt-oss-20b:free',        'GPT-OSS-20B',         '["text"]',                 '{"text":true}',      131072),
+    ('openai/gpt-oss-120b:free',       'GPT-OSS-120B',        '["text"]',                 '{"text":true}',      131072)
 ) AS m(model_id, display_name, capabilities, is_default, ctx)
 WHERE p.name = 'openrouter'
 ON CONFLICT (provider_id, model_id) DO NOTHING;

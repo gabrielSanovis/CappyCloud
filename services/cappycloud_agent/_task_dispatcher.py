@@ -62,12 +62,14 @@ class TaskDispatcher:
         repos: list | None = None,
         session_root: str = "",
         sandbox_id: str = "",
+        model: str | None = None,
     ) -> str:
         """Cria um agent_task no DB e arranca o TaskRunner correspondente.
 
         Retorna o task_id (UUID str) para que o caller possa fazer SSE.
         """
         task_id = str(uuid.uuid4())
+        log.info(f"TaskDispatcher.dispatch() task_id={task_id} conversation_id={conversation_id} model={model}")
         await self._insert_task(
             task_id=task_id,
             conversation_id=conversation_id,
@@ -79,6 +81,7 @@ class TaskDispatcher:
             self._launch_runner(
                 task_id, prompt, conversation_id,
                 repos=repos or [], session_root=session_root, sandbox_id=sandbox_id,
+                model=model,
             ),
             name=f"dispatch-{task_id[:8]}",
         )
@@ -166,6 +169,7 @@ class TaskDispatcher:
         repos: list | None = None,
         session_root: str = "",
         sandbox_id: str = "",
+        model: str | None = None,
     ) -> None:
         """Cria a sessão, inicia a GrpcSession e arranca o TaskRunner."""
         user_id = conversation_id or "system"
@@ -190,7 +194,7 @@ class TaskDispatcher:
             container_ip=sandbox.grpc_host,
             grpc_port=sandbox.grpc_port,
             session_id=f"{user_id}:{chat_id}",
-            model=self._model,
+            model=model or self._model,
             working_directory=working_directory,
         )
 

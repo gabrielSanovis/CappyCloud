@@ -12,6 +12,9 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters.secondary.persistence.sqlalchemy_ai_model_repo import (
+    SqlAlchemyAiModelRepository,
+)
 from app.adapters.secondary.persistence.sqlalchemy_conversation_repo import (
     SQLAlchemyConversationRepository,
 )
@@ -40,6 +43,7 @@ from app.domain.entities import User
 from app.infrastructure.database import get_db
 from app.ports.agent import AgentPort
 from app.ports.repositories import (
+    AiModelRepository,
     ConversationRepository,
     MessageRepository,
     RepoEnvironmentRepository,
@@ -153,6 +157,12 @@ async def get_authenticated_user(
         ) from exc
 
 
+def get_ai_model_repo(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> AiModelRepository:
+    return SqlAlchemyAiModelRepository(session)
+
+
 def get_list_convs_uc(
     convs: Annotated[ConversationRepository, Depends(get_conv_repo)],
 ) -> ListConversations:
@@ -173,11 +183,12 @@ def get_list_msgs_uc(
 
 
 def get_stream_msg_uc(
-    convs: Annotated[ConversationRepository, Depends(get_conv_repo)],
-    msgs: Annotated[MessageRepository, Depends(get_msg_repo)],
+    conversations: Annotated[ConversationRepository, Depends(get_conv_repo)],
+    messages: Annotated[MessageRepository, Depends(get_msg_repo)],
+    ai_models: Annotated[AiModelRepository, Depends(get_ai_model_repo)],
     agent: Annotated[AgentPort, Depends(get_agent)],
 ) -> StreamMessage:
-    return StreamMessage(convs, msgs, agent)
+    return StreamMessage(conversations, messages, ai_models, agent)
 
 
 def get_list_repo_envs_uc(

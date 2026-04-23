@@ -146,13 +146,20 @@ export async function registerRequest(email: string, password: string): Promise<
 }
 
 export type Conversation = {
-  id: string
-  title: string
-  created_at: string
-  updated_at: string
-  environment_id: string | null
   env_slug: string | null
   base_branch: string | null
+  ai_model_id: string | null
+}
+
+export type AiModel = {
+  id: string
+  provider_id: string
+  model_id: string
+  display_name: string
+  capabilities: string[]
+  is_default: Record<string, boolean>
+  context_window: number
+  active: boolean
 }
 
 export type ChatMessage = {
@@ -199,11 +206,20 @@ export async function fetchConversations(token: string): Promise<Conversation[]>
   return res.json()
 }
 
+export async function fetchAiModels(token: string): Promise<AiModel[]> {
+  const res = await apiFetch('/api/ai-models', {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) return []
+  return res.json()
+}
+
 export async function createConversation(
   token: string,
   environmentId?: string | null,
   baseBranch?: string | null,
   envSlug?: string | null,
+  aiModelId?: string | null,
 ): Promise<Conversation> {
   const res = await apiFetch('/api/conversations', {
     method: 'POST',
@@ -215,6 +231,7 @@ export async function createConversation(
       environment_id: environmentId ?? null,
       base_branch: baseBranch ?? null,
       env_slug: envSlug ?? null,
+      ai_model_id: aiModelId ?? null,
     }),
   })
   if (!res.ok) throw new Error('Não foi possível criar conversa')
@@ -237,7 +254,8 @@ export async function streamAssistantReply(
   token: string,
   conversationId: string,
   content: string,
-  handlers: StreamHandlers
+  handlers: StreamHandlers,
+  aiModelId?: string | null
 ): Promise<void> {
   const { signal, ...eventHandlers } = handlers
   const res = await apiFetch(`/api/conversations/${conversationId}/messages/stream`, {
@@ -246,7 +264,7 @@ export async function streamAssistantReply(
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, ai_model_id: aiModelId ?? null }),
     signal,
   })
   if (!res.ok) {
