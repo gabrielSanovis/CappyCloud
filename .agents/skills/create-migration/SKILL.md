@@ -1,6 +1,6 @@
 ---
 name: create-migration
-description: Quando precisar criar uma migration no CappyCloud, quando precisar alterar, adicionar, remover ou renomear tabelas, colunas ou qualquer alteração no banco de dados.
+description: Use está habilidade quando precisar criar uma migration no CappyCloud, quando precisar alterar, adicionar, remover ou renomear tabelas, colunas ou qualquer alteração no banco de dados.
 ---
 
 # Migrations com Alembic — CappyCloud
