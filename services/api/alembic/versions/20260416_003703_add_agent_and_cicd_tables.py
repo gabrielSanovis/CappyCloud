@@ -83,6 +83,11 @@ def upgrade() -> None:
     op.execute("CREATE INDEX IF NOT EXISTS ix_repo_environments_slug ON repo_environments(slug)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_users_email ON users(email)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_conversations_user_id ON conversations(user_id)")
+    
+    # Garantir colunas se a tabela foi criada manualmente sem elas
+    op.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS environment_id UUID REFERENCES repo_environments(id) ON DELETE SET NULL")
+    op.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS base_branch VARCHAR(255)")
+    
     op.execute(
         "CREATE INDEX IF NOT EXISTS ix_conversations_environment_id ON conversations(environment_id)"
     )
@@ -109,6 +114,13 @@ def upgrade() -> None:
             created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW()
         )
     """)
+    # Garantir colunas se a tabela foi criada manualmente sem elas
+    op.execute("ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS session_id VARCHAR(256) NOT NULL DEFAULT ''")
+    op.execute("ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS triggered_by VARCHAR(32) NOT NULL DEFAULT 'user'")
+    op.execute("ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS trigger_payload JSONB NOT NULL DEFAULT '{}'")
+    op.execute("ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS prompt TEXT NOT NULL DEFAULT ''")
+    op.execute("ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS last_event_at TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+
     op.execute(
         "CREATE INDEX IF NOT EXISTS ix_agent_tasks_conversation_id ON agent_tasks(conversation_id)"
     )

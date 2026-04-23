@@ -25,8 +25,17 @@ def upgrade() -> None:
     op.execute(sa.text("DROP INDEX IF EXISTS ix_conversations_environment_id"))
     for col in ("environment_id", "base_branch", "env_slug", "worktree_branch", "worktree_path"):
         op.execute(sa.text(f'ALTER TABLE conversations DROP COLUMN IF EXISTS "{col}"'))
-    for col in ("env_slug", "container_id", "worktree_path"):
-        op.execute(sa.text(f'ALTER TABLE cappy_sessions DROP COLUMN IF EXISTS "{col}"'))
+    
+    # cappy_sessions é legado — pode nem existir em DBs novos
+    op.execute(sa.text("""
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'cappy_sessions') THEN
+                ALTER TABLE cappy_sessions DROP COLUMN IF EXISTS "env_slug";
+                ALTER TABLE cappy_sessions DROP COLUMN IF EXISTS "container_id";
+                ALTER TABLE cappy_sessions DROP COLUMN IF EXISTS "worktree_path";
+            END IF;
+        END $$;
+    """))
 
 
 def downgrade() -> None:

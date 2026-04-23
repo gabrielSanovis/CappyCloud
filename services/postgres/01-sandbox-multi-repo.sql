@@ -11,11 +11,35 @@
 --   agent_tasks — ganha sandbox_id
 -- ──────────────────────────────────────────────────────────────
 
+-- ── Base Tables (Garantindo que existem antes do ALTER) ────────
+CREATE TABLE IF NOT EXISTS users (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email            VARCHAR(320) NOT NULL UNIQUE,
+    hashed_password  VARCHAR(255) NOT NULL,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id          UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title            VARCHAR(512) NOT NULL DEFAULT 'Nova conversa',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS agent_tasks (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id  UUID REFERENCES conversations(id) ON DELETE SET NULL,
+    env_slug         VARCHAR(128) NOT NULL,
+    status           VARCHAR(32)  NOT NULL DEFAULT 'pending',
+    created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
 -- ── Sandboxes ─────────────────────────────────────────────────
 -- Cada linha representa um container sandbox rodando openclaude gRPC.
 -- status: active | draining (sem novas sessões) | offline
 CREATE TABLE IF NOT EXISTS sandboxes (
-    id           UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id           UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
     name         VARCHAR(128) UNIQUE NOT NULL,
     host         VARCHAR(256) NOT NULL,
     grpc_port    INTEGER      NOT NULL DEFAULT 50051,
