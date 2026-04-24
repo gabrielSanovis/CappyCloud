@@ -1,8 +1,10 @@
 """ORM models — SQLAlchemy mapped classes for users, conversations and messages.
 
 Named orm_models.py (not models.py) to avoid collision with domain/entities.py.
-Agent execution models live in orm_models_agent.py (imported below to register them
-with Base.metadata for Alembic).
+Sub-modules imported at the bottom register their tables with Base.metadata for Alembic:
+  - orm_models_agent.py     → Agent, Skill (behavior profiles)
+  - orm_models_execution.py → AgentTask, AgentEvent, CicdEvent, Routine, etc.
+  - orm_models_platform.py  → GitProvider, Repository, AiProvider, AiModel, etc.
 """
 
 from __future__ import annotations
@@ -214,8 +216,12 @@ class Message(Base):
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="messages")
 
 
-# Import platform and agent models last — registers tables with Base.metadata for Alembic.
+# Import sub-modules last — registers tables with Base.metadata for Alembic.
 from app.infrastructure.orm_models_agent import (  # noqa: F401, E402
+    Agent,
+    Skill,
+)
+from app.infrastructure.orm_models_execution import (  # noqa: F401, E402
     AgentEvent,
     AgentTask,
     CicdEvent,
@@ -223,10 +229,6 @@ from app.infrastructure.orm_models_agent import (  # noqa: F401, E402
     PrSubscription,
     Routine,
     RoutineRun,
-)
-from app.infrastructure.orm_models_agents import (  # noqa: F401, E402
-    Agent,
-    Skill,
 )
 from app.infrastructure.orm_models_platform import (  # noqa: F401, E402
     AiModel,
