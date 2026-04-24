@@ -69,6 +69,14 @@ class RepositoryRepository(ABC):
     async def get_by_slug(self, slug: str) -> Repository | None:
         """Retorna o reposit\u00f3rio pelo slug \u00fanico, ou None se n\u00e3o existir."""
 
+    @abstractmethod
+    async def get_authenticated_clone_url(self, repo_id: uuid.UUID) -> str | None:
+        """Retorna clone_url com token PAT embutido, ou None se n\u00e3o houver credencial.
+
+        Decripta o token do GitProvider associado e injeta na URL para que
+        session_start.sh consiga autenticar o clone/fetch sem env vars globais.
+        """
+
 
 class ConversationRepository(ABC):
     """Port for conversation persistence operations."""

@@ -7,6 +7,7 @@ import json
 import uuid
 from collections.abc import AsyncGenerator
 
+from app.application.use_cases._stream_helpers import inject_diff_comments
 from app.domain.entities import Conversation, Message
 from app.ports.agent import AgentPort
 from app.ports.repositories import (
@@ -142,7 +143,7 @@ class StreamMessage:
         if not conv:
             raise LookupError("Conversa não encontrada.")
 
-        injected_prompt = await self._inject_diff_comments(conversation_id, content)
+        injected_prompt = await inject_diff_comments(conversation_id, content)
 
         await self._messages.save(
             Message(
@@ -161,17 +162,17 @@ class StreamMessage:
         messages_payload = [{"role": m.role, "content": m.content} for m in history]
 
         await self._ensure_repo_ids(conv)
-        pipeline_body = self._build_pipeline_body(conv, user_id, cursor)
+        pipeline_body = await self._build_pipeline_body(conv, user_id, cursor)
 
         return self._stream_chunks(
             injected_prompt, model_id, messages_payload, pipeline_body, conversation_id
         )
 
     async def _ensure_repo_ids(self, conv: Conversation) -> None:
-        """Backfill lazy: para conversas criadas antes do commit que introduziu
-        ``repo_id`` em ``Conversation.repos``, resolve ``slug \u2192 repo_id`` no
-        momento do envio de mensagem. Persiste de volta na conversa para que
-        mensagens seguintes n\u00e3o paguem o lookup de novo.
+        """Backfill lazy: resolve slug \u2192 repo_id para conversas antigas.
+
+        Persiste de volta na conversa para que mensagens seguintes n\u00e3o paguem
+        o lookup de novo.
         """
         if not self._repositories or not conv.repos:
             return
@@ -189,51 +190,47 @@ class StreamMessage:
         if changed:
             await self._conversations.update(conv)
 
-    def _build_pipeline_body(
+    async def _enrich_repos_for_pipeline(self, repos: list[dict]) -> list[dict]:
+        """Retorna nova lista com clone_url autenticada (token embutido).
+
+        O token N\u00c3O \u00e9 persistido na conversa \u2014 \u00e9 injetado apenas no payload
+        do pipeline para que session_start.sh consiga autenticar.
+        """
+        if not self._repositories:
+            return repos
+        enriched: list[dict] = []
+        for r in repos:
+            repo_id_str = r.get("repo_id")
+            if repo_id_str:
+                try:
+                    auth_url = await self._repositories.get_authenticated_clone_url(
+                        uuid.UUID(repo_id_str)
+                    )
+                    if auth_url:
+                        enriched.append({**r, "clone_url": auth_url})
+                        continue
+                except Exception:
+                    pass
+            enriched.append(r)
+        return enriched
+
+    async def _build_pipeline_body(
         self,
         conv: Conversation,
         user_id: uuid.UUID,
         cursor: int | None,
     ) -> dict:
+        repos_for_pipeline = await self._enrich_repos_for_pipeline(conv.repos)
         return {
             "user_id": str(user_id),
             "conversation_id": str(conv.id),
             "user": {"id": str(user_id)},
             "cursor": cursor,
-            "repos": conv.repos,
+            "repos": repos_for_pipeline,
             "session_root": conv.session_root or "",
             "sandbox_id": str(conv.sandbox_id) if conv.sandbox_id else "",
             "agent_id": str(conv.agent_id) if conv.agent_id else "",
         }
-
-    async def _inject_diff_comments(self, conversation_id: uuid.UUID, content: str) -> str:
-        try:
-            from sqlalchemy import text
-
-            from app.infrastructure.database import async_session_factory
-
-            async with async_session_factory() as session:
-                rows = await session.execute(
-                    text(
-                        "SELECT id, file_path, line, content FROM diff_comments "
-                        "WHERE conversation_id = :cid AND bundled_at IS NULL "
-                        "ORDER BY file_path, line"
-                    ),
-                    {"cid": str(conversation_id)},
-                )
-                comments = rows.fetchall()
-                if not comments:
-                    return content
-
-                lines = [f"at `{row.file_path}:{row.line}`: {row.content}" for row in comments]
-                ids = ", ".join(f"'{row.id}'" for row in comments)
-                await session.execute(
-                    text(f"UPDATE diff_comments SET bundled_at = NOW() WHERE id IN ({ids})")
-                )
-                await session.commit()
-                return "\n".join(lines) + "\n\n" + content
-        except Exception:
-            return content
 
     async def _stream_chunks(
         self,

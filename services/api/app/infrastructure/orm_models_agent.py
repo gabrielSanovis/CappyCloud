@@ -69,6 +69,9 @@ class Skill(Base):
     agent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUIDType, ForeignKey("agents.id", ondelete="CASCADE"), nullable=True, index=True
     )
+    repository_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("repositories.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     slug: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(512), nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -83,3 +86,6 @@ class Skill(Base):
     )
 
     agent: Mapped["Agent | None"] = relationship("Agent", back_populates="skills")
+    repository: Mapped["Repository | None"] = relationship(  # type: ignore[name-defined]
+        "Repository", foreign_keys=[repository_id]
+    )
