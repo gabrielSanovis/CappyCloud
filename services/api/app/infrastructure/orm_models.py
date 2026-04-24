@@ -85,6 +85,7 @@ class Sandbox(Base):
     grpc_port: Mapped[int] = mapped_column(Integer, nullable=False, default=50051)
     session_port: Mapped[int] = mapped_column(Integer, nullable=False, default=8080)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", index=True)
+    register_token: Mapped[str | None] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     conversations: Mapped[list["Conversation"]] = relationship(

@@ -84,6 +84,10 @@ class InMemoryRepositoryRepository(RepositoryRepository):
     async def get_by_slug(self, slug: str) -> Repository | None:
         return next((r for r in self._store.values() if r.slug == slug), None)
 
+    async def get_authenticated_clone_url(self, repo_id: uuid.UUID) -> str | None:
+        repo = self._store.get(repo_id)
+        return repo.clone_url if repo else None
+
     def add(self, repo: Repository) -> None:
         """T\u00e9cnica de teste: insere reposit\u00f3rio diretamente sem rota HTTP."""
         self._store[repo.id] = repo

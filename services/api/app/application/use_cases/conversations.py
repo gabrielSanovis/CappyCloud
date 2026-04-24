@@ -161,17 +161,17 @@ class StreamMessage:
         messages_payload = [{"role": m.role, "content": m.content} for m in history]
 
         await self._ensure_repo_ids(conv)
-        pipeline_body = self._build_pipeline_body(conv, user_id, cursor)
+        pipeline_body = await self._build_pipeline_body(conv, user_id, cursor)
 
         return self._stream_chunks(
             injected_prompt, model_id, messages_payload, pipeline_body, conversation_id
         )
 
     async def _ensure_repo_ids(self, conv: Conversation) -> None:
-        """Backfill lazy: para conversas criadas antes do commit que introduziu
-        ``repo_id`` em ``Conversation.repos``, resolve ``slug \u2192 repo_id`` no
-        momento do envio de mensagem. Persiste de volta na conversa para que
-        mensagens seguintes n\u00e3o paguem o lookup de novo.
+        """Backfill lazy: resolve slug \u2192 repo_id para conversas antigas.
+
+        Persiste de volta na conversa para que mensagens seguintes n\u00e3o paguem
+        o lookup de novo.
         """
         if not self._repositories or not conv.repos:
             return
@@ -189,18 +189,43 @@ class StreamMessage:
         if changed:
             await self._conversations.update(conv)
 
-    def _build_pipeline_body(
+    async def _enrich_repos_for_pipeline(self, repos: list[dict]) -> list[dict]:
+        """Retorna nova lista com clone_url autenticada (token embutido).
+
+        O token N\u00c3O \u00e9 persistido na conversa \u2014 \u00e9 injetado apenas no payload
+        do pipeline para que session_start.sh consiga autenticar.
+        """
+        if not self._repositories:
+            return repos
+        enriched: list[dict] = []
+        for r in repos:
+            repo_id_str = r.get("repo_id")
+            if repo_id_str:
+                try:
+                    auth_url = await self._repositories.get_authenticated_clone_url(
+                        uuid.UUID(repo_id_str)
+                    )
+                    if auth_url:
+                        enriched.append({**r, "clone_url": auth_url})
+                        continue
+                except Exception:
+                    pass
+            enriched.append(r)
+        return enriched
+
+    async def _build_pipeline_body(
         self,
         conv: Conversation,
         user_id: uuid.UUID,
         cursor: int | None,
     ) -> dict:
+        repos_for_pipeline = await self._enrich_repos_for_pipeline(conv.repos)
         return {
             "user_id": str(user_id),
             "conversation_id": str(conv.id),
             "user": {"id": str(user_id)},
             "cursor": cursor,
-            "repos": conv.repos,
+            "repos": repos_for_pipeline,
             "session_root": conv.session_root or "",
             "sandbox_id": str(conv.sandbox_id) if conv.sandbox_id else "",
             "agent_id": str(conv.agent_id) if conv.agent_id else "",

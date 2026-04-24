@@ -164,13 +164,23 @@ class Pipeline:
         except (TypeError, ValueError):
             cursor = None
 
+        # Extrai repo_ids para carregar skills vinculadas a repositórios.
+        repo_ids: list[str] = [
+            r["repo_id"] for r in repos if r.get("repo_id")
+        ]
+
         # Carrega system_prompt do agente + RAG inicial (top-N skills relevantes).
         system_prompt = ""
         skills_top: list[dict] = []
-        if agent_id:
+        if agent_id or repo_ids:
             try:
                 system_prompt, skills_top = self._run(
-                    load_agent_context(self.valves.DATABASE_URL, agent_id, user_message),
+                    load_agent_context(
+                        self.valves.DATABASE_URL,
+                        agent_id,
+                        user_message,
+                        repo_ids=repo_ids,
+                    ),
                     timeout=10,
                 )
             except Exception as exc:  # noqa: BLE001
