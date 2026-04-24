@@ -7,6 +7,7 @@ import json
 import uuid
 from collections.abc import AsyncGenerator
 
+from app.application.use_cases._stream_helpers import inject_diff_comments
 from app.domain.entities import Conversation, Message
 from app.ports.agent import AgentPort
 from app.ports.repositories import (
@@ -142,7 +143,7 @@ class StreamMessage:
         if not conv:
             raise LookupError("Conversa não encontrada.")
 
-        injected_prompt = await self._inject_diff_comments(conversation_id, content)
+        injected_prompt = await inject_diff_comments(conversation_id, content)
 
         await self._messages.save(
             Message(
@@ -230,35 +231,6 @@ class StreamMessage:
             "sandbox_id": str(conv.sandbox_id) if conv.sandbox_id else "",
             "agent_id": str(conv.agent_id) if conv.agent_id else "",
         }
-
-    async def _inject_diff_comments(self, conversation_id: uuid.UUID, content: str) -> str:
-        try:
-            from sqlalchemy import text
-
-            from app.infrastructure.database import async_session_factory
-
-            async with async_session_factory() as session:
-                rows = await session.execute(
-                    text(
-                        "SELECT id, file_path, line, content FROM diff_comments "
-                        "WHERE conversation_id = :cid AND bundled_at IS NULL "
-                        "ORDER BY file_path, line"
-                    ),
-                    {"cid": str(conversation_id)},
-                )
-                comments = rows.fetchall()
-                if not comments:
-                    return content
-
-                lines = [f"at `{row.file_path}:{row.line}`: {row.content}" for row in comments]
-                ids = ", ".join(f"'{row.id}'" for row in comments)
-                await session.execute(
-                    text(f"UPDATE diff_comments SET bundled_at = NOW() WHERE id IN ({ids})")
-                )
-                await session.commit()
-                return "\n".join(lines) + "\n\n" + content
-        except Exception:
-            return content
 
     async def _stream_chunks(
         self,
