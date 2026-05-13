@@ -13,10 +13,9 @@
 // Endpoints:
 //   POST   /sessions               → cria session_root + worktrees
 //   DELETE /sessions/:id           → remove session_root e faz worktree prune
-//   POST   /git/ls-remote-branches → git ls-remote --heads (URL com ou sem PAT)
-//   POST   /git/origin-head-branch → default local (symbolic-ref)
-//   POST   /git/branch-r           → git branch -r no clone /repos/...
-//   POST   /worktree/*              → worktree_handlers.js (ls-files, diff, PR, …)
+//   POST   /git/*                  → git_handlers.js (ls-remote, branch-r, ls-files, file)
+//   POST   /worktree/*             → worktree_handlers.js (ls-files, diff, PR, …)
+//   POST   /mcp/configure          → escreve mcpServers em ~/.claude/settings.json
 //   GET    /health                 → liveness probe
 // ──────────────────────────────────────────────────────────────
 
@@ -27,6 +26,7 @@ const { execFile, execFileSync } = require('child_process')
 const { promisify } = require('util')
 
 const gitHandlers = require('./git_handlers')
+const mcpHandler = require('./mcp_handler')
 const repoHandlers = require('./repo_handlers')
 const taskHandler = require('./task_handler')
 const worktreeHandlers = require('./worktree_handlers')
@@ -34,85 +34,36 @@ const worktreeHandlers = require('./worktree_handlers')
 const execFileAsync = promisify(execFile)
 const PORT = parseInt(process.env.SESSION_SERVER_PORT || '8080', 10)
 
-/**
- * Injeta tokens de autenticação na URL git antes de clonar/fazer fetch.
- * Prioridade: token explícito (do payload) > env var (DEVOPS_TOKEN/GITHUB_TOKEN).
- * @param {string} url
- * @param {string} explicitToken - PAT recebido no payload (do banco)
- * @param {string} providerType - github | azure_devops
- * @returns {string}
- */
 function injectToken(url, explicitToken = '', providerType = '') {
-  const devopsToken = explicitToken && (providerType === 'azure_devops' || /dev\.azure\.com/.test(url))
-    ? explicitToken
-    : (process.env.DEVOPS_TOKEN || '')
-  const githubToken = explicitToken && (providerType === 'github' || /github\.com/.test(url))
-    ? explicitToken
-    : (process.env.GITHUB_TOKEN || '')
-  let result = url
-  if (devopsToken && result.includes('dev.azure.com')) {
-    result = result.replace(/https:\/\/([^@]*@)?dev\.azure\.com/, `https://pat:${devopsToken}@dev.azure.com`)
-  }
-  if (githubToken && result.includes('github.com')) {
-    result = result.replace(/https:\/\/([^@]*@)?github\.com/, `https://x-token:${githubToken}@github.com`)
-  }
-  return result
+  const dt = explicitToken && (providerType === 'azure_devops' || /dev\.azure\.com/.test(url)) ? explicitToken : (process.env.DEVOPS_TOKEN || '')
+  const gt = explicitToken && (providerType === 'github' || /github\.com/.test(url)) ? explicitToken : (process.env.GITHUB_TOKEN || '')
+  let res = url
+  if (dt && res.includes('dev.azure.com')) res = res.replace(/https:\/\/([^@]*@)?dev\.azure\.com/, `https://pat:${dt}@dev.azure.com`)
+  if (gt && res.includes('github.com')) res = res.replace(/https:\/\/([^@]*@)?github\.com/, `https://x-token:${gt}@github.com`)
+  return res
 }
 
 function json(res, status, body) {
-  const payload = JSON.stringify(body)
-  res.writeHead(status, {
-    'Content-Type': 'application/json',
-    'Content-Length': Buffer.byteLength(payload),
-  })
-  res.end(payload)
+  const p = JSON.stringify(body); res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(p) }); res.end(p)
 }
-
 function readBody(req) {
   return new Promise((resolve, reject) => {
-    let data = ''
-    req.on('data', chunk => { data += chunk })
-    req.on('end', () => {
-      try { resolve(data ? JSON.parse(data) : {}) }
-      catch { reject(new Error('Invalid JSON body')) }
-    })
-    req.on('error', reject)
+    let d = ''; req.on('data', c => { d += c }); req.on('end', () => { try { resolve(d ? JSON.parse(d) : {}) } catch { reject(new Error('Invalid JSON')) } }); req.on('error', reject)
   })
 }
 
 // ── Cria um worktree via session_start.sh ──────────────────────
 async function createWorktree({ slug, alias, base_branch, branch_name, worktree_path, clone_url = '' }) {
   const args = [slug, alias, worktree_path, base_branch || '', branch_name || '', clone_url]
-  const { stdout, stderr } = await execFileAsync('/session_start.sh', args, {
-    env: { ...process.env },
-    timeout: 60_000,
-  })
-  const gitDir = path.join(worktree_path, '.git')
-  if (!fs.existsSync(gitDir)) {
-    throw new Error(`worktree não foi criado em ${worktree_path}`)
-  }
+  const { stdout, stderr } = await execFileAsync('/session_start.sh', args, { env: { ...process.env }, timeout: 60_000 })
+  if (!fs.existsSync(path.join(worktree_path, '.git'))) throw new Error(`worktree não foi criado em ${worktree_path}`)
   return (stdout + stderr).trim()
 }
-
-// ── Remove session_root e prune worktrees ─────────────────────
 async function destroySession({ session_root, repos }) {
-  if (session_root) {
-    await execFileAsync('rm', ['-rf', session_root], { timeout: 30_000 }).catch(() => {})
-  }
-
-  // repos pode vir como array, string JSON ou null/undefined.
-  let arr = repos
-  if (typeof arr === 'string') {
-    try { arr = JSON.parse(arr) } catch { arr = [] }
-  }
-  if (!Array.isArray(arr)) arr = []
-  const slugs = new Set(arr.map(r => r && r.slug).filter(Boolean))
-  for (const slug of slugs) {
-    await execFileAsync(
-      'git', ['-C', `/repos/${slug}`, 'worktree', 'prune'],
-      { timeout: 30_000 }
-    ).catch(() => {})
-  }
+  if (session_root) await execFileAsync('rm', ['-rf', session_root], { timeout: 30_000 }).catch(() => {})
+  let arr = Array.isArray(repos) ? repos : []; if (typeof repos === 'string') try { arr = JSON.parse(repos) } catch {}
+  const slugs = new Set((Array.isArray(arr) ? arr : []).map(r => r && r.slug).filter(Boolean))
+  for (const slug of slugs) await execFileAsync('git', ['-C', `/repos/${slug}`, 'worktree', 'prune'], { timeout: 30_000 }).catch(() => {})
 }
 
 // ── HTTP server ───────────────────────────────────────────────
@@ -122,85 +73,39 @@ const server = http.createServer(async (req, res) => {
 
   try {
     // GET /health
-    if (req.method === 'GET' && pathname === '/health') {
-      return json(res, 200, { status: 'ok' })
-    }
+    if (req.method === 'GET' && pathname === '/health') return json(res, 200, { status: 'ok' })
 
     // POST /sessions — cria sessão multi-repo
     if (req.method === 'POST' && pathname === '/sessions') {
-      const body = await readBody(req)
-      const {
-        session_id,
-        repos = [],
-        session_root = '',
-      } = body
-
-      if (!session_id) {
-        return json(res, 400, { error: 'session_id is required' })
-      }
-
-      if (!session_root) {
-        return json(res, 400, { error: 'session_root is required' })
-      }
+      const { session_id, repos = [], session_root = '' } = await readBody(req)
+      if (!session_id || !session_root) return json(res, 400, { error: 'session_id/root required' })
 
       const outputs = []
       const repos_created = []
 
       fs.mkdirSync(session_root, { recursive: true })
 
-      // CLAUDE.md na raiz da sessão: só se não houver instruções no próprio repo
-      // (cada worktree pode ter o seu CLAUDE.md / AGENTS.md). Aqui é a raiz
-      // multi-repo, fica como descrição neutra do ambiente.
-      if (
-        !fs.existsSync(path.join(session_root, 'CLAUDE.md')) &&
-        !fs.existsSync(path.join(session_root, 'AGENTS.md')) &&
-        fs.existsSync('/app/CLAUDE.md')
-      ) {
+      if (!fs.existsSync(path.join(session_root, 'CLAUDE.md')) && !fs.existsSync(path.join(session_root, 'AGENTS.md')) && fs.existsSync('/app/CLAUDE.md')) {
         fs.copyFileSync('/app/CLAUDE.md', path.join(session_root, 'CLAUDE.md'))
       }
 
-      for (const repo of repos) {
-        const { slug, alias, base_branch: rb, branch_name, clone_url: rc } = repo
-        if (!slug || !alias) continue
-        const wt_path = path.join(session_root, alias)
-        const resolved_branch = branch_name || `cappy/${slug}/${session_id}-${alias}`
+      for (const r of repos) {
+        const { slug, alias, base_branch: rb, branch_name, clone_url: rc } = r; if (!slug || !alias) continue
+        const wt_path = path.join(session_root, alias), b = branch_name || `cappy/${slug}/${session_id}-${alias}`
         try {
-          const out = await createWorktree({
-            slug,
-            alias,
-            base_branch: rb || 'main',
-            branch_name: resolved_branch,
-            worktree_path: wt_path,
-            clone_url: rc || '',
-          })
-          outputs.push(`[${alias}] ${out}`)
-          repos_created.push({ alias, branch_name: resolved_branch, worktree_path: wt_path })
-          console.log(`[session_server] created worktree ${wt_path} on branch ${resolved_branch}`)
+          const out = await createWorktree({ slug, alias, base_branch: rb || 'main', branch_name: b, worktree_path: wt_path, clone_url: rc || '' })
+          outputs.push(`[${alias}] ${out}`); repos_created.push({ alias, branch_name: b, worktree_path: wt_path })
         } catch (err) {
           const msg = ((err.stdout || '') + (err.stderr || '')).trim() || err.message
-          console.error(`[session_server] failed worktree ${wt_path}: ${msg}`)
-          outputs.push(`[${alias}] ERROR: ${msg}`)
-          repos_created.push({ alias, branch_name: resolved_branch, worktree_path: wt_path, error: msg })
+          outputs.push(`[${alias}] ERROR: ${msg}`); repos_created.push({ alias, branch_name: b, worktree_path: wt_path, error: msg })
         }
       }
-
-      const errors = repos_created.filter(r => r.error)
-      if (errors.length > 0) {
-        return json(res, 500, {
-          session_id,
-          session_root,
-          repos_created,
-          error: 'failed to create one or more repo worktrees',
-          output: outputs.join('\n'),
-        })
+      if (repos.length > 1 && repos_created.length > 0 && !repos_created[0].error) {
+        const firstWt = repos_created[0].worktree_path, claudeSrc = path.join(session_root, 'CLAUDE.md'), claudeDst = path.join(firstWt, 'CLAUDE.md')
+        if (fs.existsSync(claudeSrc) && !fs.existsSync(claudeDst)) try { fs.copyFileSync(claudeSrc, claudeDst) } catch {}
       }
-
-      return json(res, 200, {
-        session_id,
-        session_root,
-        repos_created,
-        output: outputs.join('\n'),
-      })
+      const errs = repos_created.filter(r => r.error)
+      return json(res, 200, { session_id, session_root, repos_created, output: outputs.join('\n'), ...(errs.length > 0 ? { warnings: errs.map(r => `[${r.alias}] ${r.error}`) } : {}) })
     }
 
     // DELETE /sessions/:id — remove sessão
@@ -214,6 +119,34 @@ const server = http.createServer(async (req, res) => {
       await destroySession({ session_root, repos })
       console.log(`[session_server] removed session ${session_id}`)
       return json(res, 200, { deleted: true, session_id })
+    }
+
+    // DELETE /sessions/:id/worktree/:alias — remove a single worktree from a session
+    const deleteWorktreeMatch = pathname.match(/^\/sessions\/([^/]+)\/worktree\/([^/]+)$/)
+    if (req.method === 'DELETE' && deleteWorktreeMatch) {
+      const session_id = deleteWorktreeMatch[1]
+      const alias = deleteWorktreeMatch[2]
+      const session_root = url.searchParams.get('session_root') || ''
+      const slug = url.searchParams.get('slug') || alias
+
+      const worktreePath = session_root
+        ? path.join(session_root, alias)
+        : `/repos/sessions/${session_id}/${alias}`
+
+      try {
+        // Remove the worktree directory
+        await execFileAsync('rm', ['-rf', worktreePath], { timeout: 30_000 })
+        // Prune worktree metadata from the bare repo
+        await execFileAsync(
+          'git', ['-C', `/repos/${slug}`, 'worktree', 'prune'],
+          { timeout: 30_000 }
+        ).catch(() => {})
+        console.log(`[session_server] removed worktree ${alias} (${worktreePath}) from session ${session_id}`)
+        return json(res, 200, { deleted: true, session_id, alias, worktree_path: worktreePath })
+      } catch (err) {
+        console.error(`[session_server] failed to remove worktree ${alias}: ${err.message}`)
+        return json(res, 500, { error: err.message })
+      }
     }
 
     // /repos/clone (POST) e /repos/:slug (DELETE)
@@ -258,7 +191,7 @@ const server = http.createServer(async (req, res) => {
 
     if (await worktreeHandlers.tryHandle(req, res, { json, readBody })) return
 
-    // POST /git-auth — reconfigura credenciais git (token actualizado no DB)
+    // POST /git-auth — reconfigura credenciais git (token atualizado no DB)
     if (req.method === 'POST' && pathname === '/git-auth') {
       const { provider_type, token, base_url } = await readBody(req)
       try {
@@ -282,6 +215,9 @@ const server = http.createServer(async (req, res) => {
         return json(res, 500, { error: err.message })
       }
     }
+
+    // POST /mcp/configure — delega para mcp_handler.js
+    if (await mcpHandler.tryHandle(req, res, { json, readBody })) return
 
     return json(res, 404, { error: 'Not found' })
   } catch (err) {
